@@ -255,10 +255,10 @@ func (s *Server) initAgent() error {
 
 	env := prompt.DetectEnvironment(wd)
 	env.Model = p.Model
+	// Instructions and auto-memory are injected by conversation.InjectLongTermMemory
+	// as system-reminder messages; the system prompt only carries Skills here.
 	systemPrompt := prompt.BuildSystemPrompt(env, prompt.BuildOptions{
-		CustomInstructions: s.instructionsContent,
-		MemorySection:      s.memoryContent,
-		SkillSection:       skillSection,
+		SkillSection: skillSection,
 	})
 
 	client, err := llm.NewClient(p, systemPrompt)

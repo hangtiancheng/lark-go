@@ -929,10 +929,10 @@ func (m *Model) rebuildSystemPrompt(wd string) string {
 	if m.selectedProvider != nil {
 		env.Model = m.selectedProvider.Model
 	}
+	// Instructions and auto-memory are injected by conversation.InjectLongTermMemory
+	// as system-reminder messages; the system prompt only carries Skills here.
 	return prompt.BuildSystemPrompt(env, prompt.BuildOptions{
-		CustomInstructions: m.instructionsContent,
-		MemorySection:      m.memoryContent,
-		SkillSection:       skillSection,
+		SkillSection: skillSection,
 	})
 }
 

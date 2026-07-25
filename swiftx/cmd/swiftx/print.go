@@ -107,10 +107,10 @@ func runPrint(userPrompt string, cfg *config.AppConfig, hookCfgs []hooks.Hook, o
 
 	env := prompt.DetectEnvironment(wd)
 	env.Model = p.Model
+	// Instructions and auto-memory are injected by conversation.InjectLongTermMemory
+	// as system-reminder messages; the system prompt only carries Skills here.
 	systemPrompt := prompt.BuildSystemPrompt(env, prompt.BuildOptions{
-		CustomInstructions: instructionsContent,
-		MemorySection:      memoryContent,
-		SkillSection:       skillSection,
+		SkillSection: skillSection,
 	})
 
 	client, err := llm.NewClient(p, systemPrompt)

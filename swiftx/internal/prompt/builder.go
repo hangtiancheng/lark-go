@@ -47,13 +47,11 @@ type EnvironmentContext struct {
 }
 
 type BuildOptions struct {
-	// CustomInstructions holds custom instruction content loaded from instruction files such as SWIFTX.md.
-	CustomInstructions string
-	// MemorySection holds persistent memory content loaded from auto-memory.
-	MemorySection string
-	SkillSection  string
+	// SkillSection holds skill descriptions injected into the system prompt.
+	// Project instructions and auto-memory are delivered separately by
+	// conversation.InjectLongTermMemory as system-reminder messages.
+	SkillSection string
 }
-
 type Builder struct {
 	sections []Section
 }
@@ -117,14 +115,7 @@ func BuildSystemPrompt(env EnvironmentContext, opts BuildOptions) string {
 	b.Add(OutputEfficiencySection())
 	b.Add(EnvironmentSection(env))
 
-	// Custom instructions (priority 80, higher than environment info but lower than skills).
-	if opts.CustomInstructions != "" {
-		b.Add(Section{
-			Name:     "CustomInstructions",
-			Priority: 80,
-			Content:  "# Project Instructions\n\n" + opts.CustomInstructions,
-		})
-	}
+	// Skill descriptions (priority 90, placed after fixed sections)
 
 	if opts.SkillSection != "" {
 		b.Add(Section{
@@ -133,15 +124,5 @@ func BuildSystemPrompt(env EnvironmentContext, opts BuildOptions) string {
 			Content:  opts.SkillSection,
 		})
 	}
-
-	// Persistent memory (priority 95, placed last for maximum model attention).
-	if opts.MemorySection != "" {
-		b.Add(Section{
-			Name:     "Memory",
-			Priority: 95,
-			Content:  opts.MemorySection,
-		})
-	}
-
 	return b.Build()
 }
