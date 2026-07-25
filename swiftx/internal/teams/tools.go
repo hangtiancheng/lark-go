@@ -86,13 +86,15 @@ func (t *SendMessageTool) Execute(ctx context.Context, args map[string]any) tool
 		return tools.ToolResult{Output: "Error: 'to' and 'content' are required", IsError: true}
 	}
 
-	// 结构化消息走独立通道：它们要带 requestId 和表态，拼进正文的话
-	// 收件方还得从自然语言里猜，那就退回到「靠理解措辞来协调」了。
+	// Structured messages use a separate channel: they carry requestId and a
+	// decision flag. Embedding them in the body text would force the recipient
+	// to parse natural language, regressing to "coordinating by interpreting
+	// wording".
 	if msgType != "" && msgType != MsgText {
 		return t.sendTyped(to, msgType, requestID, content, approve, hasApprove)
 	}
 
-	// 广播：把消息发给发送者所在团队的所有其它成员
+	// Broadcast: send the message to all other members in the sender's team.
 	if to == "*" {
 		for _, teamName := range t.TeamMgr.ListTeams() {
 			team := t.TeamMgr.GetTeam(teamName)
@@ -140,7 +142,8 @@ func (t *SendMessageTool) Execute(ctx context.Context, args map[string]any) tool
 		}
 	}
 
-	// 通过全局名称注册表把收件人名字解析成投递用的标识；解析不到就按原名兜底。
+	// Resolve the recipient name to a delivery identifier via the global name
+	// registry; fall back to the original name if resolution fails.
 	recipient := to
 	if resolved := GetNameRegistry().Resolve(to); resolved != "" {
 		recipient = resolved
@@ -327,8 +330,10 @@ func (t *TeamDeleteTool) Execute(ctx context.Context, args map[string]any) tools
 	}
 }
 
-// sendTyped 投递结构化消息。它和普通文本走同一个信箱，区别只在于
-// 消息上带了 Type / RequestID / Approve 三个字段，收件方按字段判断，不用解析措辞。
+// sendTyped delivers a structured message. It uses the same mailbox as plain
+// text; the only difference is that the message carries Type / RequestID /
+// Approve fields, allowing the recipient to decide based on fields rather than
+// parsing wording.
 func (t *SendMessageTool) sendTyped(to, msgType, requestID, content string, approve, hasApprove bool) tools.ToolResult {
 	var msg FileMailMessage
 	switch msgType {
@@ -364,8 +369,8 @@ func (t *SendMessageTool) sendTyped(to, msgType, requestID, content string, appr
 	return tools.ToolResult{Output: fmt.Sprintf("%s sent to %s.", msgType, to)}
 }
 
-// senderTeam 找到发送者所属的团队。Lead 本身不在 Members 里，
-// 它发消息时取自己名下唯一的那个团队。
+// senderTeam finds the team the sender belongs to. The Lead itself is not in
+// Members; when it sends a message, use the only team under its name.
 func (t *SendMessageTool) senderTeam() *Team {
 	names := t.TeamMgr.ListTeams()
 	for _, name := range names {

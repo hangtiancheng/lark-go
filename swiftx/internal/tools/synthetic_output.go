@@ -7,11 +7,12 @@ import (
 	"strings"
 )
 
-// SyntheticOutputTool 让 Agent 以结构化数据交付最终结果。
-// 非交互模式和 coordinator 模式下，调用方要的是能直接解析的 JSON，
-// 而不是夹在自然语言里的一段文字。
+// SyntheticOutputTool lets the Agent deliver its final result as structured
+// data. In non-interactive and coordinator modes, callers expect directly
+// parseable JSON rather than prose embedded in natural language.
 type SyntheticOutputTool struct {
-	// JSONSchema 可选。设置后会校验 output 是否符合调用方约定的结构。
+	// JSONSchema is optional. When set, the output is validated against the
+	// structure agreed upon with the caller.
 	JSONSchema map[string]any
 }
 
@@ -52,7 +53,7 @@ func (t *SyntheticOutputTool) Execute(ctx context.Context, args map[string]any) 
 		}
 	}
 
-	// 字符串原样返回，不做二次 JSON 包装
+	// Strings are returned as-is without a secondary JSON wrapping.
 	if s, isString := output.(string); isString {
 		return ToolResult{Output: s}
 	}
@@ -67,8 +68,10 @@ func (t *SyntheticOutputTool) Execute(ctx context.Context, args map[string]any) 
 	return ToolResult{Output: string(encoded)}
 }
 
-// validateSchema 只覆盖顶层类型和必填字段，返回空字符串表示通过。
-// 完整的 JSON Schema 校验没有必要，这里挡的是模型交付结构明显走样的情况。
+// validateSchema covers only top-level type and required fields; an empty
+// string return means validation passed. Full JSON Schema validation is
+// unnecessary here — this guards against obviously malformed delivery
+// structures from the model.
 func (t *SyntheticOutputTool) validateSchema(data any) string {
 	if t.JSONSchema == nil {
 		return ""

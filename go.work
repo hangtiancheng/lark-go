@@ -11,11 +11,11 @@ use (
 	./demo/tcc_demo
 	./demo/time_wheel
 	./demo/timer_demo
+	./swiftx
 	./swifty_agent
 	./swifty_cache
 	./swifty_chat
 	./swifty_chatbot
-	./swiftx
 	./swifty_http
 	./swifty_orm
 	./swifty_rpc

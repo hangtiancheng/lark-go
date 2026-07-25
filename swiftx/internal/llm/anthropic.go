@@ -126,8 +126,9 @@ func (c *anthropicClient) Stream(ctx context.Context, conv *conversation.Manager
 	events := make(chan StreamEvent, 64)
 	errs := make(chan error, 1)
 
-	// 发请求前补齐工具调用与结果的配对：中断、恢复会话、并发交错都可能留下
-	// 悬空的 tool_use，缺配对会被 API 直接拒掉。
+	// Ensure tool_use/tool_result pairing before sending the request: interruptions,
+	// session resumptions, and concurrent interleaving can leave dangling tool_use
+	// blocks, which the API rejects outright if unpaired.
 	msgs := buildAnthropicMessages(conversation.EnsureToolPairing(conv.GetMessages()))
 
 	var sdkTools []anthropic.ToolUnionParam

@@ -1,8 +1,3 @@
-// 来源：公众号@小林coding
-// 后端八股网站：xiaolincoding.com
-// Agent网站：xiaolinnote.com
-// 简历模版：jianli.xiaolinnote.com
-
 package teams
 
 import (
@@ -15,28 +10,28 @@ func TestTeamFileRoundTrip(t *testing.T) {
 	useTempHome(t)
 
 	tm := NewTeamManager()
-	team := tm.CreateTeamFull("Refactor Auth", ModeInProcess, "lead", "重构认证模块")
+	team := tm.CreateTeamFull("Refactor Auth", ModeInProcess, "lead", "refactor the auth module")
 	team.AddMember("alice", nil, nil, "anthropic")
 	team.SetMemberMeta("alice", "worker", "claude-sonnet-4-6", "/tmp/wt/alice")
 
-	// 换一个全新的 manager，模拟队员进程或下一次会话
+	// Use a fresh manager to simulate a teammate process or the next session.
 	fresh := NewTeamManager()
 	got := fresh.GetTeam("Refactor Auth")
 	if got == nil {
-		t.Fatal("期望从磁盘重建出团队，实际拿到 nil")
+		t.Fatal("expected team to be reconstructed from disk, got nil")
 	}
 	if got.LeadAgentID != "lead" {
-		t.Errorf("LeadAgentID = %q，期望 lead", got.LeadAgentID)
+		t.Errorf("LeadAgentID = %q, want lead", got.LeadAgentID)
 	}
-	if got.Description != "重构认证模块" {
-		t.Errorf("Description = %q，期望 重构认证模块", got.Description)
+	if got.Description != "refactor the auth module" {
+		t.Errorf("Description = %q, want 'refactor the auth module'", got.Description)
 	}
 	m, ok := got.Members["alice"]
 	if !ok {
-		t.Fatalf("成员 alice 没恢复出来，现有成员：%v", got.Members)
+		t.Fatalf("member alice was not restored, current members: %v", got.Members)
 	}
 	if m.AgentType != "worker" || m.Model != "claude-sonnet-4-6" || m.WorktreePath != "/tmp/wt/alice" {
-		t.Errorf("成员元信息没对上：%+v", m)
+		t.Errorf("member metadata mismatch: %+v", m)
 	}
 }
 
@@ -48,7 +43,7 @@ func TestTeamFilePathIsSanitized(t *testing.T) {
 
 	want := filepath.Join(teamsBaseDir(), "refactor-auth-", "config.json")
 	if _, err := os.Stat(want); err != nil {
-		t.Fatalf("期望配置落在 %s，stat 失败：%v", want, err)
+		t.Fatalf("expected config at %s, stat failed: %v", want, err)
 	}
 }
 
@@ -58,21 +53,21 @@ func TestDeleteTeamRemovesDir(t *testing.T) {
 	tm := NewTeamManager()
 	tm.CreateTeamFull("gone", ModeInProcess, "lead", "")
 	if _, err := os.Stat(teamDir("gone")); err != nil {
-		t.Fatalf("建团队后目录应存在：%v", err)
+		t.Fatalf("directory should exist after team creation: %v", err)
 	}
 
 	tm.DeleteTeam("gone")
 	if _, err := os.Stat(teamDir("gone")); !os.IsNotExist(err) {
-		t.Errorf("拆团队后目录应被清掉，err = %v", err)
+		t.Errorf("directory should be removed after team deletion, err = %v", err)
 	}
 	if fresh := NewTeamManager().GetTeam("gone"); fresh != nil {
-		t.Errorf("拆掉的团队不该还能从磁盘捞回来")
+		t.Errorf("a deleted team should not be recoverable from disk")
 	}
 }
 
 func TestGetTeamMissingReturnsNil(t *testing.T) {
 	useTempHome(t)
 	if got := NewTeamManager().GetTeam("never-existed"); got != nil {
-		t.Errorf("不存在的团队应返回 nil，实际 %+v", got)
+		t.Errorf("non-existent team should return nil, got %+v", got)
 	}
 }

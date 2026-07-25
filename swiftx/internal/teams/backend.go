@@ -1,8 +1,3 @@
-// 来源：公众号@小林coding
-// 后端八股网站：xiaolincoding.com
-// Agent网站：xiaolinnote.com
-// 简历模版：jianli.xiaolinnote.com
-
 package teams
 
 import (
@@ -10,22 +5,26 @@ import (
 	"runtime"
 )
 
-// detectBackend：只有已身处 tmux / iTerm2 会话时才用窗格后端，
-// 否则回退进程内。判断依据是环境变量——tmux 和 iTerm2 会自动给会话内的进程设上
-// TMUX / ITERM_SESSION_ID，用户无需手动配置。
-// DetectBackend 暴露给外部包用：Agent 工具在指定的 Team 不存在时会自己建，
-// 建的时候要按当前环境选后端。
+// detectBackend: use a pane backend only when already inside a tmux / iTerm2
+// session; otherwise fall back to in-process. Detection relies on environment
+// variables — tmux and iTerm2 automatically set TMUX / ITERM_SESSION_ID for
+// processes inside a session, requiring no manual configuration.
+// DetectBackend is exported for external packages: the Agent tool auto-creates
+// a Team when the specified one does not exist, and needs to pick a backend
+// based on the current environment.
 func DetectBackend() TeamMode { return detectBackend() }
 
 func detectBackend() TeamMode {
-	// Windows 护栏：tmux 窗格 spawn 时用 pwsh 执行 POSIX 命令会失败，一律进程内。
+	// Windows guard: tmux pane spawn executes POSIX commands via pwsh which
+	// fails, so always use in-process on Windows.
 	if runtime.GOOS == "windows" {
 		return ModeInProcess
 	}
 	return detectBackendFromEnv()
 }
 
-// detectBackendFromEnv 只按环境变量判断，抽出来便于单测（不受运行平台影响）。
+// detectBackendFromEnv determines the backend solely from environment variables,
+// extracted for unit testing (independent of the host platform).
 func detectBackendFromEnv() TeamMode {
 	if os.Getenv("TMUX") != "" {
 		return ModeTmux

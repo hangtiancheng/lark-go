@@ -159,7 +159,7 @@ func TestExecuteRoutesBackgroundSpecToAsync(t *testing.T) {
 	}
 }
 
-// cwd 是留给内部调用方的参数，不进 schema，模型看不到也就不会传。
+// cwd is a parameter reserved for internal callers; it is not part of the schema, so the model never sees it and will not pass it.
 func TestSchemaDoesNotExposeCwd(t *testing.T) {
 	tool := &AgentTool{
 		Registry: tools.NewRegistry(),
@@ -169,7 +169,7 @@ func TestSchemaDoesNotExposeCwd(t *testing.T) {
 	inputSchema, _ := tool.Schema()["input_schema"].(map[string]any)
 	props, _ := inputSchema["properties"].(map[string]any)
 	if _, ok := props["cwd"]; ok {
-		t.Error("cwd 不应出现在 Agent 工具的 schema 里")
+		t.Error("cwd should not appear in the Agent tool's schema")
 	}
 }
 

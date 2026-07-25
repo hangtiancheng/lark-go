@@ -302,8 +302,10 @@ func (s *Server) initAgent() error {
 		ag.Hooks = eng
 	}
 
-	// 队员干完活的回传落在 lead 信箱里，每轮排空成 system-reminder 交给 Lead。
-	// coordinator 模式下 Lead 只能靠这条通道知道队员的进展，断了就等于派出去石沉大海。
+	// Teammate completion reports land in the lead's mailbox and are drained each turn
+	// into system-reminders handed to the Lead. In coordinator mode this is the only
+	// channel through which the Lead learns of teammate progress; if it breaks, dispatched
+	// work is effectively lost.
 	ag.NotificationFn = func() []string {
 		var messages []string
 		if s.taskMgr != nil {
@@ -524,8 +526,9 @@ func (s *Server) handleSlashCommand(input string) {
 			s.conv = conversation.NewManager()
 			if s.ag != nil {
 				s.ag.ClearActiveSkills()
-				// Skill 的工具收窄随对话一起清掉，但 coordinator 的约束不清：
-				// 它跟着 Team 走，Team 还在就该继续管着 Lead。
+				// The skill tool narrowing is cleared together with the conversation, but the
+				// coordinator constraints are not: they follow the Team, and as long as the Team
+				// still exists they should keep governing the Lead.
 				s.ag.SetToolFilter(teams.CoordinatorToolFilter(s.enableCoordinatorMode))
 			}
 			s.send(wsMessage{Type: "clear", Data: nil})
@@ -758,7 +761,8 @@ func (s *Server) handleResume(args string) {
 	// Clear old UI and replay messages
 	s.send(wsMessage{Type: "clear", Data: nil})
 	for _, msg := range replay {
-		// 只带工具结果的消息没有文本，不推给前端，但要进对话历史保住调用链
+		// Messages carrying only tool results have no text; don't push them to the frontend,
+		// but keep them in the conversation history to preserve the call chain.
 		s.conv.AppendMessages([]conversation.Message{msg.ToConversation()})
 		if msg.Content == "" {
 			continue
@@ -848,7 +852,8 @@ func (s *Server) consumeAgentEvents() {
 
 		case agent.LoopComplete:
 			if streamBuf != "" {
-				// 助手消息由主循环在进入对话历史时落盘，这里只负责推送给前端
+				// Assistant messages are persisted by the main loop when they enter the conversation
+				// history; here we only push them to the frontend.
 				s.send(wsMessage{Type: "stream_end", Data: map[string]string{"text": streamBuf}})
 				streamBuf = ""
 			}

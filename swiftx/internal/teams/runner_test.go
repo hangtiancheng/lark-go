@@ -1,8 +1,3 @@
-// 来源：公众号@小林coding
-// 后端八股网站：xiaolincoding.com
-// Agent网站：xiaolinnote.com
-// 简历模版：jianli.xiaolinnote.com
-
 package teams
 
 import (
@@ -21,8 +16,9 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
-	// 团队目录是 <home>/.swiftx/teams，把主目录整个指到临时目录，
-	// 整个包的用例都落在沙箱里。Windows 读 USERPROFILE，其余平台读 HOME。
+	// The team directory is <home>/.swiftx/teams; redirect the entire home
+	// directory to a temp dir so all package tests land in the sandbox.
+	// Windows reads USERPROFILE; other platforms read HOME.
 	_ = os.Setenv("HOME", tmp)
 	_ = os.Setenv("USERPROFILE", tmp)
 	code := m.Run()

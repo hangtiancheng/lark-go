@@ -43,15 +43,17 @@ import (
 // Type empty (omitempty), so old sessions and normal turns are unaffected.
 const TypeCompactBoundary = "compact_boundary"
 
-// ToolUseRecord 是落盘形式的工具调用。这里存的是与协议无关的内部表示，
-// 而不是某一家厂商的线格式，因此恢复会话时即使换了 provider 也能还原。
+// ToolUseRecord is the on-disk form of a tool invocation. It stores a
+// protocol-agnostic internal representation rather than any single vendor's
+// wire format, so a session can be restored even after switching providers.
 type ToolUseRecord struct {
 	ToolUseID string         `json:"tool_use_id"`
 	ToolName  string         `json:"tool_name"`
 	Arguments map[string]any `json:"arguments,omitempty"`
 }
 
-// ToolResultRecord 是落盘形式的工具结果，与 ToolUseRecord 通过 ToolUseID 配对。
+// ToolResultRecord is the on-disk form of a tool result, paired with a
+// ToolUseRecord via ToolUseID.
 type ToolResultRecord struct {
 	ToolUseID string `json:"tool_use_id"`
 	Content   string `json:"content"`
@@ -66,14 +68,16 @@ type Message struct {
 	Type    string `json:"type,omitempty"`
 	Content string `json:"content"`
 	Ts      int64  `json:"ts"`
-	// ToolUses / ToolResults 保存这条消息携带的工具块。两者为空时整个字段从 JSON
-	// 中省略，因此不含这两个字段的会话文件依然能正常读出，只是没有工具链。
+	// ToolUses / ToolResults hold the tool blocks carried by this message. When both
+	// are empty the fields are omitted from JSON entirely, so session files lacking
+	// these fields still load fine — just without a tool chain.
 	ToolUses    []ToolUseRecord    `json:"tool_uses,omitempty"`
 	ToolResults []ToolResultRecord `json:"tool_results,omitempty"`
 }
 
-// FromConversation 把内存中的对话消息转成落盘形式。
-// 思考块不落盘：它的 signature 只在同一轮工具循环内需要回传，跨会话恢复用不上。
+// FromConversation converts an in-memory conversation message into its on-disk form.
+// Thinking blocks are not persisted: their signature is only needed when echoed back
+// within the same tool loop, and is useless for cross-session restoration.
 func FromConversation(msg conversation.Message) Message {
 	rec := Message{
 		Role:    msg.Role,
@@ -97,7 +101,8 @@ func FromConversation(msg conversation.Message) Message {
 	return rec
 }
 
-// ToConversation 把落盘记录还原成内存中的对话消息，供 resume 重建历史。
+// ToConversation restores an on-disk record back into an in-memory conversation
+// message, used by resume to rebuild history.
 func (m Message) ToConversation() conversation.Message {
 	msg := conversation.Message{
 		Role:    m.Role,
@@ -120,8 +125,9 @@ func (m Message) ToConversation() conversation.Message {
 	return msg
 }
 
-// KeepMessage 是压缩发生时原样保留下来的一条近期消息。与 Message 一样携带
-// 工具块，压缩后恢复会话时这段尾巴才不会缺掉工具调用链。
+// KeepMessage is a recent message preserved verbatim when compaction occurs. Like
+// Message, it carries tool blocks so that restoring a compacted session keeps this
+// tail's tool call chain intact.
 type KeepMessage struct {
 	Role        string             `json:"role"`
 	Content     string             `json:"content"`
@@ -129,7 +135,7 @@ type KeepMessage struct {
 	ToolResults []ToolResultRecord `json:"tool_results,omitempty"`
 }
 
-// FromConversationKeep 把保留下来的尾巴消息转成落盘形式。
+// FromConversationKeep converts a kept tail message into its on-disk form.
 func FromConversationKeep(msg conversation.Message) KeepMessage {
 	rec := FromConversation(msg)
 	return KeepMessage{
@@ -208,7 +214,8 @@ type SessionInfo struct {
 func NewID() string {
 	var b [2]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		// crypto/rand 极少失败；兜底用纳秒低 16 位，仍能避免同秒同进程冲突
+		// crypto/rand rarely fails; fall back to the low 16 bits of the nanosecond
+		// clock, which still avoids collisions within the same second and process.
 		return fmt.Sprintf("%s-%04x", time.Now().Format("20060102-150405"), time.Now().UnixNano()&0xFFFF)
 	}
 	return time.Now().Format("20060102-150405") + "-" + hex.EncodeToString(b[:])
@@ -253,8 +260,9 @@ func LoadSession(workDir, sessionID string) []Message {
 		if json.Unmarshal(scanner.Bytes(), &msg) != nil {
 			continue
 		}
-		// 只带工具结果的消息本身没有文本内容，不能按 Content 是否为空来过滤，
-		// 否则整条工具往返都会在恢复会话时被丢掉。
+		// A message carrying only tool results has no text content of its own; it must
+		// not be filtered by whether Content is empty, or the entire tool round-trip
+		// would be dropped when the session is restored.
 		if msg.Content == "" && len(msg.ToolUses) == 0 && len(msg.ToolResults) == 0 {
 			continue
 		}
@@ -263,7 +271,8 @@ func LoadSession(workDir, sessionID string) []Message {
 	return msgs
 }
 
-// maxSessionAgeDays 是会话的最大保留天数，超过此天数的会话会被自动清理。
+// maxSessionAgeDays is the maximum retention period for sessions; sessions older
+// than this are cleaned up automatically.
 const maxSessionAgeDays = 30
 
 func ListSessions(workDir string) []SessionInfo {
@@ -287,7 +296,7 @@ func ListSessions(workDir string) []SessionInfo {
 			continue
 		}
 
-		// 自动清理超过 30 天的过期会话
+		// Automatically clean up expired sessions older than 30 days.
 		if info.ModTime().Before(cutoff) {
 			os.Remove(filepath.Join(dir, e.Name()))
 			continue

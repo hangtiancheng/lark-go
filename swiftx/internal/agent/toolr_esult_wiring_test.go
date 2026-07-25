@@ -1,7 +1,4 @@
-// 来源：公众号@小林coding
-// 后端八股网站：xiaolincoding.com
-// Agent网站：xiaolinnote.com
-// 简历模版：jianli.xiaolinnote.com
+// Tests for tool-result budget wiring in the agent main loop.
 
 package agent
 
@@ -17,8 +14,10 @@ import (
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/tools"
 )
 
-// 这些测试驱动完整的 Agent 主循环，验证工具结果预算在入历史时的接线：
-// 单条溢写、聚合溢写、回读豁免，以及进入对话历史的内容就是最终形态。
+// These tests drive the full Agent main loop and verify the tool-result budget
+// wiring at the point results enter history: single-result spilling, aggregate
+// spilling, readback exemption, and that the content stored in the conversation
+// history is already in its final form.
 
 func findToolResultsMsg(t *testing.T, conv *conversation.Manager) conversation.Message {
 	t.Helper()
@@ -52,13 +51,13 @@ func TestIngestSpillsSingleOversizedResult(t *testing.T) {
 
 	_, events := runConversationRound(ag, conv, "go")
 
-	// 进历史的内容是预览，不是原文
+	// The content stored in history is a preview, not the raw original.
 	msg := findToolResultsMsg(t, conv)
 	got := msg.ToolResults[0].Content
 	if !strings.HasPrefix(got, "<persisted-output>") {
 		t.Fatalf("history content should be a preview, got %d chars: %q...", len(got), got[:40])
 	}
-	// 溢写文件保存了完整原文
+	// The spill file saved the complete raw original.
 	fi, err := os.Stat(filepath.Join(tool_result.SpillDir(ag.WorkDir, ""), "t1.txt"))
 	if err != nil {
 		t.Fatalf("spill file missing: %v", err)
@@ -66,7 +65,7 @@ func TestIngestSpillsSingleOversizedResult(t *testing.T) {
 	if fi.Size() != 60000 {
 		t.Fatalf("spill file size = %d, want 60000", fi.Size())
 	}
-	// UI 事件携带原始输出
+	// The UI event carries the raw output.
 	trs := getToolResults(events)
 	if len(trs) != 1 || len(trs[0].Output) != 60000 {
 		t.Fatalf("UI event should carry raw output, got %d results", len(trs))
@@ -97,20 +96,20 @@ func TestIngestReadbackExempt(t *testing.T) {
 
 	runConversationRound(ag, conv, "read it back")
 
-	// 回读结果豁免溢写：原文进历史
+	// The readback result is exempt from spilling: the raw original enters history.
 	msg := findToolResultsMsg(t, conv)
 	if got := msg.ToolResults[0].Content; len(got) != 60000 {
 		t.Fatalf("readback should stay raw, got %d chars", len(got))
 	}
-	// 没有为回读结果生成新的溢写文件
+	// No new spill file was generated for the readback result.
 	if _, err := os.Stat(filepath.Join(tool_result.SpillDir(ag0WorkDir, ""), "t_rb.txt")); !os.IsNotExist(err) {
 		t.Fatal("readback result must not be spilled")
 	}
 }
 
 func TestIngestAggregateSpillsLargest(t *testing.T) {
-	// 5 个并行工具各 ~45K，单条都不超限，合计 225K 超聚合线，
-	// 只有最大的 t3 被溢写。
+	// 5 parallel tools each ~45K; none exceeds the single-result limit, but the
+	// combined 225K exceeds the aggregate threshold, so only the largest (t3) is spilled.
 	sizes := map[string]int{"T1": 45000, "T2": 45000, "T3": 45001, "T4": 45000, "T5": 45000}
 	var first []llm.StreamEvent
 	reg := tools.NewRegistry()

@@ -72,7 +72,7 @@ const ForkBoilerplateTag = "<fork_boilerplate>"
 // ForkAgentType matches FORK_AGENT.agentType from the design TypeScript implementation.
 const ForkAgentType = "fork"
 
-// GeneralPurposeAgentType 是 fork 关闭时，省略 subagent_type 的回退目标。
+// GeneralPurposeAgentType is the fallback target when subagent_type is omitted while fork is disabled.
 const GeneralPurposeAgentType = "general-purpose"
 
 // ForkQuerySource matches the value produced by getQuerySourceForAgent for fork children
@@ -102,9 +102,10 @@ type AgentTool struct {
 	// summarized out of conversation history.
 	QuerySource string
 
-	// ForkDisabled 为真时，省略 subagent_type 不再 fork，而是回退到通用 agent。
-	// 用「关闭」而不是「开启」语义，是为了让零值就是默认行为（fork 可用），
-	// 每个构造点不必都显式赋值。
+	// ForkDisabled, when true, makes an omitted subagent_type fall back to the
+	// general-purpose agent instead of forking. The "disabled" rather than "enabled"
+	// semantics are used so that the zero value is the default behavior (fork available),
+	// sparing every construction site from having to set it explicitly.
 	ForkDisabled bool
 }
 
@@ -237,8 +238,9 @@ func (t *AgentTool) Execute(ctx context.Context, args map[string]any) tools.Tool
 	agentName, _ := args["name"].(string)
 	teamName, _ := args["team_name"].(string)
 	modeOverride, _ := args["mode"].(string)
-	// cwd 不进 schema，只供内部调用方指定子 Agent 的工作目录；
-	// 与 isolation: "worktree" 同时给出时以 worktree 为准。
+	// cwd is not part of the schema; it is only for internal callers to specify the
+	// sub-agent's working directory. When given together with isolation: "worktree",
+	// the worktree takes precedence.
 	cwdOverride, _ := args["cwd"].(string)
 	isolation, _ := args["isolation"].(string)
 	planModeRequired, _ := args["plan_mode_required"].(bool)
@@ -257,9 +259,11 @@ func (t *AgentTool) Execute(ctx context.Context, args map[string]any) tools.Tool
 		return t.runAsTeammate(ctx, teamName, agentName, description, prompt, modelOverride, subagentType, isolation, planModeRequired)
 	}
 
-	// 省略 subagent_type 时的走向由配置决定：fork 开着就继承父对话，关着就当成
-	// 没指定类型，回退到通用 agent。这里不报错，模型只是没填一个可选参数，
-	// 为此中断一次调用不值得，回退到通用 agent 一样能把活干了。
+	// When subagent_type is omitted, the path taken is decided by configuration: with fork
+	// enabled it inherits the parent conversation; with fork disabled it is treated as an
+	// unspecified type and falls back to the general-purpose agent. No error is raised here —
+	// the model merely left out an optional parameter, and aborting the call over that is not
+	// worth it; the general-purpose agent can get the job done just as well.
 	if subagentType == "" && t.ForkDisabled {
 		subagentType = GeneralPurposeAgentType
 	}
@@ -618,8 +622,9 @@ func (t *AgentTool) runAsTeammate(
 	teamName, memberName, description, prompt, modelOverride, subagentType, isolation string,
 	planModeRequired bool,
 ) tools.ToolResult {
-	// 团队不存在就顺手建一个：coordinator 模式下 TeamCreate 不在白名单里，
-	// 要求 Lead 先建团队再派人，它会卡在第一步。
+	// If the team doesn't exist, create it on the fly: in coordinator mode TeamCreate is not
+	// on the whitelist, so requiring the Lead to create the team before dispatching members
+	// would leave it stuck at the first step.
 	team := t.TeamMgr.GetTeam(teamName)
 	if team == nil {
 		team = t.TeamMgr.CreateTeamFull(teamName, teams.DetectBackend(), teams.LeadName, description)
@@ -649,8 +654,9 @@ func (t *AgentTool) runAsTeammate(
 	}
 
 	subRegistry := FilterToolsForAgent(t.Registry, spec.Tools, spec.DisallowedTools, false)
-	// 队友协作工具：以队友自己的名字发消息，并注入团队共享任务板工具
-	// （覆盖继承来的个人版同名工具，让队友之间共享同一份任务列表）。
+	// Teammate collaboration tools: send messages under the teammate's own name, and inject
+	// the team-shared task board tools (overriding the inherited personal same-named tools so
+	// that teammates share a single task list).
 	subRegistry.Register(&teams.SendMessageTool{TeamMgr: t.TeamMgr, SenderName: memberName})
 	subRegistry.Register(&teams.TaskCreateTool{TeamMgr: t.TeamMgr, TeamName: teamName, AgentName: memberName})
 	subRegistry.Register(&teams.TaskGetTool{TeamMgr: t.TeamMgr, TeamName: teamName})
@@ -682,8 +688,9 @@ func (t *AgentTool) runAsTeammate(
 
 	team.SetMemberMeta(memberName, subagentType, modelOverride, workdir)
 
-	// 标了 plan_mode_required 的队友以计划模式启动：只能读不能改，
-	// 写出计划交 Lead 审批，通过后才切回正常权限。
+	// A teammate marked plan_mode_required starts in plan mode: it can only read, not modify.
+	// It writes out a plan for the Lead to approve, and only switches back to normal
+	// permissions after approval.
 	teammateChecker := t.ParentChecker
 	if planModeRequired && t.ParentChecker != nil {
 		teammateChecker = permissions.NewChecker(

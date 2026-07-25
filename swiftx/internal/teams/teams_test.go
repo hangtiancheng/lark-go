@@ -55,7 +55,8 @@ func TestFileMailBoxConcurrentSends(t *testing.T) {
 	}
 	wg.Wait()
 	close(sendErrs)
-	// 发送失败会直接导致收件箱少消息，先把错误暴露出来，避免只看到条数对不上
+	// Send failures directly cause missing messages in the inbox; surface
+	// errors first to avoid only seeing a count mismatch.
 	for err := range sendErrs {
 		t.Errorf("send failed: %v", err)
 	}
@@ -70,7 +71,8 @@ func TestFileMailBoxConcurrentSends(t *testing.T) {
 }
 
 func TestTeamManagerCRUD(t *testing.T) {
-	// 每个用例用独立的 teams 目录，避免复跑时消息累积到同一个收件箱
+	// Each test case uses an isolated teams directory to prevent messages from
+	// accumulating in the same inbox across runs.
 	useTempHome(t)
 	tm := NewTeamManager()
 
@@ -96,7 +98,8 @@ func TestTeamManagerCRUD(t *testing.T) {
 // The tool must recognize LeadName and route via the sender's team
 // mailbox so the lead can read the reply on its next sweep.
 func TestSendMessageToolRoutesToLead(t *testing.T) {
-	// 每个用例用独立的 teams 目录，避免复跑时消息累积到同一个收件箱
+	// Each test case uses an isolated teams directory to prevent messages from
+	// accumulating in the same inbox across runs.
 	useTempHome(t)
 	tm := NewTeamManager()
 	team := tm.CreateTeam("demo", ModeInProcess)
@@ -130,7 +133,8 @@ func TestSendMessageToolRoutesToLead(t *testing.T) {
 // team contains the sender, sending to the lead can't pick a mailbox and
 // must surface a clear error rather than silently dropping the message.
 func TestSendMessageToolUnknownSenderToLead(t *testing.T) {
-	// 每个用例用独立的 teams 目录，避免复跑时消息累积到同一个收件箱
+	// Each test case uses an isolated teams directory to prevent messages from
+	// accumulating in the same inbox across runs.
 	useTempHome(t)
 	tm := NewTeamManager()
 	tm.CreateTeam("demo", ModeInProcess) // no members added

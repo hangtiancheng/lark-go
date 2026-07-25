@@ -41,7 +41,7 @@ func main() {
 		return
 	}
 
-	// 解析 -p/--print 和 --remote 模式
+	// Parse -p/--print and --remote mode flags
 	remoteAddr := ""
 	var filteredArgs []string
 	for i := 1; i < len(os.Args); i++ {
@@ -68,10 +68,10 @@ func main() {
 		validHooks = nil
 	}
 
-	// -p/--print 模式：非交互式执行，输出结果后退出
+	// -p/--print mode: non-interactive execution, outputs result and exits
 	if userPrompt, outputFormat, ok := parsePrintFlags(os.Args[1:]); ok {
 		if userPrompt == "" {
-			// 从 stdin 读取 prompt
+			// Read prompt from stdin
 			buf, _ := os.ReadFile("/dev/stdin")
 			userPrompt = string(buf)
 		}

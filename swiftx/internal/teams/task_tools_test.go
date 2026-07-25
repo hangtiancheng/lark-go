@@ -6,7 +6,8 @@ import (
 	"testing"
 )
 
-// newTestTeamManager 把团队目录指向临时目录，避免写进真实项目目录。
+// newTestTeamManager points the team directory to a temp dir to avoid writing
+// into the real project directory.
 func newTestTeamManager(t *testing.T) *TeamManager {
 	t.Helper()
 	useTempHome(t)

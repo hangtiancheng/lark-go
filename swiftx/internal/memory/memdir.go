@@ -85,8 +85,10 @@ func TruncateEntrypointContent(raw string) EntrypointTruncation {
 		if cutAt > 0 {
 			truncated = truncated[:cutAt]
 		} else {
-			// 整段没有换行只能硬切，此时要回退到字符边界：UTF-8 的后续字节高两位
-			// 固定是 10，从截断点往前跳过它们才不会把一个汉字劈成两半
+			// No newline in the entire segment — hard-cut required. Back up to a
+			// valid UTF-8 character boundary: continuation bytes always have the
+			// high two bits set to 10, so skip backwards past them to avoid
+			// splitting a multi-byte character.
 			end := MaxEntrypointBytes
 			for end > 0 && truncated[end]&0xC0 == 0x80 {
 				end--

@@ -84,7 +84,7 @@ func (c *openaiClient) Stream(ctx context.Context, conv *conversation.Manager, t
 	events := make(chan StreamEvent, 64)
 	errs := make(chan error, 1)
 
-	// 发请求前补齐工具调用与结果的配对，理由同 Anthropic 分支
+	// Ensure tool call/result pairing before sending the request (same rationale as the Anthropic branch).
 	input := buildOpenAIInput(conversation.EnsureToolPairing(conv.GetMessages()))
 
 	var tools []responses.ToolUnionParam

@@ -1,8 +1,8 @@
 package prompt
 
-// coordinatorPrompt 是 Lead 进入 coordinator 模式后收到的调度指引。
-// 工具集被收窄之后，模型还需要知道该怎么用这几件工具干活，
-// 否则它只会发现自己读不了文件，却不知道该派队员去读。
+// coordinatorPrompt is the dispatch guidance the Lead receives upon entering coordinator mode.
+// After the tool set is narrowed, the model still needs to know how to use those tools effectively;
+// otherwise it only discovers it cannot read files, without knowing it should delegate to workers.
 const coordinatorPrompt = `You are Swiftx, an AI assistant that orchestrates software engineering tasks across multiple workers.
 
 ## 1. Your Role
@@ -158,17 +158,20 @@ You:
 
   Fix is in progress.`
 
-// coordinatorSparseReminder 是复述版，只留最容易被模型忘掉的那几条硬约束。
+// coordinatorSparseReminder is the condensed version, retaining only the hard constraints most easily forgotten by the model.
 const coordinatorSparseReminder = `Coordinator mode still active (see full instructions earlier in conversation). You cannot read files, run commands, or edit code — send a worker instead. Tools: Agent, SendMessage, TaskStop, SyntheticOutput, TeamDelete. Address workers by the name in the from= field of a team-notification. Synthesize worker findings yourself before directing follow-up work.`
 
-// CoordinatorReminder 返回 coordinator 模式的调度指引，每轮以 system-reminder 注入。
-// 不做成系统提示词段落有两个原因：一是长会话里模型会漂移，系统提示词只在开头出现一次，
-// 聊到第二十轮那几条硬约束早被淹没了，每轮追加一次才拉得回来；二是系统提示词属于缓存前缀，
-// 动它等于让后面所有内容重新计费，而 system-reminder 是追加到对话末尾的普通消息。
+// CoordinatorReminder returns the coordinator-mode dispatch guidance, injected as a system-reminder each turn.
+// It is not placed in the system prompt for two reasons: first, in long conversations the model drifts —
+// the system prompt appears only once at the beginning, so by turn twenty those hard constraints are buried;
+// appending each turn pulls them back. Second, the system prompt belongs to the cached prefix; modifying it
+// invalidates the cache for all subsequent content, whereas a system-reminder is a plain message appended at
+// the end of the conversation.
 //
-// 首轮发全文，之后按间隔复述精简版。这份指引有 8KB 出头，而 AddSystemReminder 是纯 append，
-// 每轮原样重发的话，十几轮下来光重复内容就能占掉几万 token，
-// 恰好把这个模式省下来的上下文又填了回去。
+// The full text is sent on the first turn; afterwards the condensed version is repeated at intervals. This
+// guidance is just over 8KB, and AddSystemReminder is a pure append — resending it verbatim every turn would
+// accumulate tens of thousands of tokens of repetition over a dozen turns, filling back up the context window
+// that this mode was designed to save.
 func CoordinatorReminder(iteration int) string {
 	if iteration <= 1 {
 		return coordinatorPrompt

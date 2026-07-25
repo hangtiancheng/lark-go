@@ -1,7 +1,7 @@
-// 来源：公众号@小林coding
-// 后端八股网站：xiaolincoding.com
-// Agent网站：xiaolinnote.com
-// 简历模版：jianli.xiaolinnote.com
+// Source: WeChat Official Account @xiaolincoding
+// Backend interview website: xiaolincoding.com
+// Agent website: xiaolinnote.com
+// Resume templates: jianli.xiaolinnote.com
 
 package skills
 
@@ -15,7 +15,7 @@ import (
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/tools"
 )
 
-// writeSkill 在临时目录里落一个 SKILL.md，返回可直接加载的技能根目录。
+// writeSkill drops a SKILL.md into a temp directory and returns a skill root that can be loaded directly.
 func writeSkill(t *testing.T, name, frontmatter, body string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -30,7 +30,7 @@ func writeSkill(t *testing.T, name, frontmatter, body string) string {
 	return root
 }
 
-// fork 模式下 SOP 正文交给子 Agent，主对话只拿到最终结果。
+// In fork mode the SOP body is handed to a sub-agent; the main conversation only receives the final result.
 func TestLoadSkillToolForkRunsSubAgent(t *testing.T) {
 	root := writeSkill(t, "audit-deps", "mode: fork\n", "Inspect go.mod and flag risky pins.")
 	catalog, err := LoadFromDirectory(root)
@@ -61,7 +61,7 @@ func TestLoadSkillToolForkRunsSubAgent(t *testing.T) {
 	}
 }
 
-// 宿主没有接入子 Agent 运行时（ForkHost 为 nil）时回退成 inline，工具仍然可用。
+// When the host has not wired up a sub-agent runtime (ForkHost is nil), fall back to inline so the tool still works.
 func TestLoadSkillToolForkFallsBackWithoutForkHost(t *testing.T) {
 	root := writeSkill(t, "audit-deps", "mode: fork\n", "Inspect go.mod and flag risky pins.")
 	catalog, err := LoadFromDirectory(root)
@@ -84,7 +84,7 @@ func TestLoadSkillToolForkFallsBackWithoutForkHost(t *testing.T) {
 	}
 }
 
-// inline 模式保持原样：返回 SOP 正文并登记激活。
+// Inline mode keeps the original behavior: return the SOP body and register the activation.
 func TestLoadSkillToolInlineReturnsBody(t *testing.T) {
 	root := writeSkill(t, "commit", "mode: inline\n", "Write a conventional commit message.")
 	catalog, err := LoadFromDirectory(root)
@@ -107,7 +107,7 @@ func TestLoadSkillToolInlineReturnsBody(t *testing.T) {
 	}
 }
 
-// 老写法 context: fork 与 mode: fork 等价，从别的生态拿来的技能也能正确隔离执行。
+// The legacy `context: fork` syntax is equivalent to `mode: fork`, so skills imported from other ecosystems also run in isolation correctly.
 func TestLoadSkillToolLegacyContextForkRunsSubAgent(t *testing.T) {
 	root := writeSkill(t, "audit-deps", "context: fork\n", "Inspect go.mod and flag risky pins.")
 	catalog, err := LoadFromDirectory(root)

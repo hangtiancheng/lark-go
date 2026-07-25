@@ -10,9 +10,11 @@ var SkipDirs = map[string]bool{
 	"__pycache__": true, ".tox": true, ".mypy_cache": true,
 }
 
-// MaxOutputChars 是单条工具结果进入对话历史前的溢写阈值：超过这个字符数
-// 就把完整内容写盘，历史里只留预览和文件路径。定在 50000 而不是更小的值，
-// 是为了让模型一次能看到足够多的内容，不必为了看全结果再发一轮 ReadFile。
+// MaxOutputChars is the spill threshold applied before a single tool result
+// enters the conversation history: content exceeding this character count is
+// written to disk, leaving only a preview and the file path in history. Set
+// to 50000 rather than a smaller value so the model can see enough content
+// in one pass without needing an extra ReadFile round-trip.
 const MaxOutputChars = 50000
 
 type ToolResult struct {
@@ -36,13 +38,17 @@ type Tool interface {
 	Execute(ctx context.Context, args map[string]any) ToolResult
 }
 
-// DeferrableTool 让工具声明自己要不要延迟加载。延迟的工具不出现在初始 tool list 里，
-// 模型得先用 ToolSearch 把 schema 捞出来才能调。
+// DeferrableTool lets a tool declare whether it should be lazily loaded.
+// Deferred tools do not appear in the initial tool list; the model must first
+// use ToolSearch to retrieve the schema before invoking them.
 //
-// 只有 MCP 工具实现它。MCP 是按项目配的，一个服务器动辄几十个工具，schema 又长，
-// 全塞进初始 tool list 会把上下文占掉一大块，而且大部分工具这次会话根本用不上。
-// 内建工具是固定的那几十个，数量可控，藏起来只会让模型多绕一次 ToolSearch，
-// 所以一律不延迟，直接给全量 schema。
+// Only MCP tools implement this interface. MCP servers are configured
+// per-project and can expose dozens of tools with lengthy schemas; including
+// all of them in the initial tool list would consume a large portion of the
+// context, and most tools are unused in any given session. Built-in tools are
+// a fixed, manageable set — hiding them would only force the model through an
+// extra ToolSearch round-trip, so they are never deferred and always expose
+// their full schema.
 type DeferrableTool interface {
 	ShouldDefer() bool
 }

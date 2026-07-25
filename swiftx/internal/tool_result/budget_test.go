@@ -31,7 +31,7 @@ import (
 
 func batchOf(sizes map[string]int) []conversation.ToolResultBlock {
 	var rs []conversation.ToolResultBlock
-	// 固定顺序，保证测试可重复
+	// Fixed order to ensure test reproducibility.
 	for _, id := range []string{"t1", "t2", "t3", "t4", "t5"} {
 		if n, ok := sizes[id]; ok {
 			rs = append(rs, conversation.ToolResultBlock{
@@ -63,7 +63,8 @@ func TestApplyBudgetUnderLimitUntouched(t *testing.T) {
 }
 
 func TestApplyBudgetSpillsLargestFirst(t *testing.T) {
-	// 5 × 45K = 225K，超过 200K。只需要溢写最大的一条就能回到限额内。
+	// 5 x 45K = 225K, exceeding the 200K limit. Spilling only the largest
+	// result is sufficient to get back under the limit.
 	rs := batchOf(map[string]int{"t1": 45000, "t2": 45000, "t3": 45001, "t4": 45000, "t5": 45000})
 	dir := t.TempDir()
 
@@ -72,7 +73,7 @@ func TestApplyBudgetSpillsLargestFirst(t *testing.T) {
 	if got := totalLen(rs); got > MessageAggregateLimit {
 		t.Fatalf("aggregate %d still over limit %d", got, MessageAggregateLimit)
 	}
-	// t3 最大，应当被溢写
+	// t3 is the largest and should have been spilled.
 	var t3 string
 	replaced := 0
 	for _, r := range rs {
@@ -89,7 +90,7 @@ func TestApplyBudgetSpillsLargestFirst(t *testing.T) {
 	if !strings.HasPrefix(t3, "<persisted-output>") {
 		t.Fatal("largest result t3 should have been spilled")
 	}
-	// 溢写文件存在且内容完整
+	// The spill file exists and its content is complete.
 	data := filepath.Join(SpillDir(dir, ""), "t3.txt")
 	if fi := mustStat(t, data); fi != 45001 {
 		t.Fatalf("spill file size = %d, want 45001", fi)
@@ -97,7 +98,8 @@ func TestApplyBudgetSpillsLargestFirst(t *testing.T) {
 }
 
 func TestApplyBudgetExemptSkipped(t *testing.T) {
-	// 最大的一条被豁免（如溢写文件回读），应溢写次大的
+	// The largest result is exempt (e.g. a spill-file readback); the next
+	// largest should be spilled instead.
 	rs := batchOf(map[string]int{"t1": 45000, "t2": 45000, "t3": 45001, "t4": 45000, "t5": 45000})
 	exempt := map[string]bool{"t3": true}
 
@@ -126,7 +128,8 @@ func TestApplyBudgetAllExemptAcceptsOverage(t *testing.T) {
 }
 
 func TestApplyBudgetDeterministic(t *testing.T) {
-	// 相同输入两次调用（同一磁盘目录），产出的预览字符串逐字节相同
+	// Two calls with identical input (same disk directory) must produce
+	// byte-identical preview strings.
 	dir := t.TempDir()
 	rs1 := batchOf(map[string]int{"t1": 45000, "t2": 45000, "t3": 45001, "t4": 45000, "t5": 45000})
 	rs2 := batchOf(map[string]int{"t1": 45000, "t2": 45000, "t3": 45001, "t4": 45000, "t5": 45000})
@@ -142,7 +145,7 @@ func TestApplyBudgetDeterministic(t *testing.T) {
 }
 
 func TestApplyBudgetIdempotent(t *testing.T) {
-	// 处理过的批子（总量已 ≤ 限额）再跑一遍是 no-op
+	// A batch already under the limit is a no-op on a second pass.
 	dir := t.TempDir()
 	rs := batchOf(map[string]int{"t1": 45000, "t2": 45000, "t3": 45001, "t4": 45000, "t5": 45000})
 	ApplyBudget(rs, nil, dir, "")
@@ -188,13 +191,13 @@ func TestPersistLargeResultRoundTrip(t *testing.T) {
 	if !strings.HasPrefix(preview, "<persisted-output>") {
 		t.Fatalf("preview missing tag: %q", preview[:40])
 	}
-	if !strings.Contains(preview, "预览（前 2KB）") {
+	if !strings.Contains(preview, "Preview (first 2KB)") {
 		t.Fatal("preview missing preview section")
 	}
 	if fi := mustStat(t, filepath.Join(SpillDir(wd, ""), "t_big.txt")); fi != 60000 {
 		t.Fatalf("spill file size = %d, want 60000", fi)
 	}
-	// 再次调用（文件已存在）返回相同预览
+	// A second call (file already exists) returns the identical preview.
 	if again := PersistLargeResult(wd, "", "t_big", content); again != preview {
 		t.Fatal("second persist must reproduce identical preview")
 	}

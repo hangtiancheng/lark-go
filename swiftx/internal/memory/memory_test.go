@@ -27,9 +27,10 @@ import (
 	"testing"
 )
 
-// isolateHome 把用户级记忆目录指向临时目录。os.UserHomeDir 在 Windows 上读
-// USERPROFILE、在类 Unix 上读 HOME，两个都要设，否则测试会落到真实的
-// ~/.swiftx/memory 上，与其它并行测试互相干扰。
+// isolateHome redirects the user-level memory directory to a temporary directory.
+// os.UserHomeDir reads USERPROFILE on Windows and HOME on Unix-like systems; both
+// must be set, otherwise tests would fall through to the real ~/.swiftx/memory and
+// interfere with other parallel tests.
 func isolateHome(t *testing.T) {
 	t.Helper()
 	home := t.TempDir()

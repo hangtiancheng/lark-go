@@ -72,8 +72,9 @@ type Agent struct {
 	// Mode on or off (e.g., when a team is created/torn down) without restarting the agent.
 	Instructions  string
 	MemoryContent string
-	// MemoryRecallCh 非阻塞 memory recall：prefetch 与主 LLM 调用并行，
-	// 工具执行后从 channel 读取并注入
+	// MemoryRecallCh is a non-blocking memory recall channel: prefetch runs in
+	// parallel with the main LLM call; the result is read and injected after
+	// tool execution completes.
 	MemoryRecallCh <-chan string
 	ToolNameFilter func(name string) bool
 	// CoordinatorActiveFn, when non-nil, reports whether Coordinator Mode is currently in effect.
@@ -167,7 +168,7 @@ func (a *Agent) currentToolSchemas() []map[string]any {
 	if a.ToolNameFilter == nil {
 		return schemas
 	}
-	// 过滤器就是唯一依据，不留任何例外分支
+	// The filter is the sole authority; no exception branches are retained.
 	return filterSchemasByName(schemas, a.ToolNameFilter)
 }
 
@@ -212,9 +213,10 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 				conv.AddSystemReminder(reminder)
 			}
 
-			// Coordinator 模式：工具集被收窄的同时注入调度指引。
-			// 走 system-reminder 而不是系统提示词：长会话里开头那份约束会被淹没，
-			// 每轮追加一次才拉得回来，而且系统提示词是缓存前缀，动它整段都要重新计费。
+			// Coordinator Mode: inject scheduling guidance alongside the narrowed tool set.
+			// Delivered via system-reminder rather than the system prompt: in long sessions
+			// the initial constraints get buried, and appending each turn keeps them salient.
+			// The system prompt is a cache prefix — mutating it invalidates the entire cache.
 			if a.CoordinatorActiveFn != nil && a.CoordinatorActiveFn() {
 				conv.AddSystemReminder(prompt.CoordinatorReminder(iteration))
 			}
@@ -237,8 +239,8 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 			a.emitHook(hooks.EventPreSend, "", nil)
 
 			// Layer 2: auto-compact
-			// Layer 1（工具结果预算）在结果入历史时已处理完，历史里的
-			// 内容就是最终大小，直接用其消息估算 token
+			// Layer 1 (tool result budget) is already applied when results enter history;
+			// the stored content is at its final size, so token estimation uses it directly.
 			if msg, err := compact.ManageContext(ctx, conv, a.Client, a.WorkDir, a.SessionID, a.ContextWindow, a.MaxOutputTokens, &a.compactTracking, a.RecoveryState, toolSchemas); err == nil && msg != "" {
 				ch <- CompactEvent{Message: msg}
 				conv.ClearUsageAnchor()
@@ -278,7 +280,7 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 						ToolName: e.ToolName,
 						Args:     e.Arguments,
 					}
-					// 收集工具调用，等流式结束后按安全性分批执行
+					// Collect tool calls; batch-execute by safety category after streaming completes.
 					executor.Submit(toolCallInfo{
 						toolID:    e.ToolID,
 						toolName:  e.ToolName,
@@ -385,11 +387,12 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 			// estimated incrementally on top of this baseline.
 			anchorAfterAssistant()
 
-			// 按安全性分批执行：只读工具并发，写/命令工具串行
+			// Batch-execute by safety category: read-only tools concurrently, write/command tools serially.
 			results := executor.ExecuteAll(ctx, a)
 
-			// 溢写文件的回读结果豁免溢写：把模型刚读回来的内容再写盘换成
-			// 预览，模型就永远看不到全文，还会在「读回、溢写」之间打转。
+			// Spill-file readback results are exempt from spilling: if the content the model
+			// just read back were persisted and replaced with a preview, the model would never
+			// see the full text and would loop between "read back" and "spill" indefinitely.
 			exempt := make(map[string]bool)
 			for _, tc := range toolCalls {
 				if tool_result.IsSpillReadback(tc.ToolName, tc.Arguments, a.WorkDir, a.SessionID) {
@@ -415,8 +418,9 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 
 				content := r.output
 				if len(content) > tools.MaxOutputChars && !exempt[r.toolID] {
-					// 单条超限：写盘换预览。写盘失败会原样保留，同一块磁盘
-					// 聚合预算也不必再试，所以两种结果都标记豁免。
+					// Single result exceeds limit: persist to disk and replace with preview.
+					// If the write fails the original is retained; either way the result is
+					// marked exempt so the aggregate budget won't retry it.
 					content = tool_result.PersistLargeResult(a.WorkDir, a.SessionID, r.toolID, r.output)
 					exempt[r.toolID] = true
 				}
@@ -427,8 +431,9 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 				})
 			}
 
-			// 聚合预算：一轮并行工具的结果落在同一条消息里，单条阈值管不住
-			// 合计超限的情况。进历史前把整批处理完，消息一出生就是终态。
+			// Aggregate budget: parallel tool results land in a single message, so the
+			// per-item threshold cannot prevent the combined total from exceeding the limit.
+			// Process the entire batch before it enters history so the message is born final.
 			tool_result.ApplyBudget(toolResults, exempt, a.WorkDir, a.SessionID)
 
 			if consecutiveUnknown >= 3 {
@@ -446,16 +451,16 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 			conv.AddToolResultsMessage(toolResults)
 			a.persistLastMessage(conv)
 
-			// 非阻塞 memory recall：工具执行完后检查 prefetch 是否就绪
+			// Non-blocking memory recall: check whether the prefetch is ready after tool execution.
 			if a.MemoryRecallCh != nil {
 				select {
 				case recall := <-a.MemoryRecallCh:
 					if recall != "" {
 						conv.AddSystemReminder(recall)
 					}
-					a.MemoryRecallCh = nil // 只消费一次
+					a.MemoryRecallCh = nil // consume only once
 				default:
-					// prefetch 还没好，下轮再检查
+					// Prefetch not ready yet; will check again next iteration.
 				}
 			}
 
@@ -506,8 +511,8 @@ func filterSchemasByName(schemas []map[string]any, allow func(name string) bool)
 func (a *Agent) handleStreamError(ctx context.Context, ch chan AgentEvent, conv *conversation.Manager, err error) (retry, compacted bool) {
 	var ctxErr *llm.ContextTooLongError
 	if errors.As(err, &ctxErr) {
-		// 历史里的工具结果在入历史时已按预算处理为终态，直接传 nil
-		// 让 ForceCompact 使用 conv 自身消息
+		// Tool results in history are already at their final form (budget applied on ingest),
+		// so pass nil and let ForceCompact use conv's own messages directly.
 		msg, compactErr := compact.ForceCompact(ctx, conv, a.Client, a.WorkDir, a.SessionID, a.ContextWindow, a.RecoveryState, a.currentToolSchemas())
 		if compactErr == nil && msg != "" {
 			ch <- CompactEvent{Message: "Auto-compacted due to context length: " + msg}
@@ -680,11 +685,12 @@ func formatToolArgs(args map[string]any) string {
 	return strings.Join(parts, ", ")
 }
 
-// persistLastMessage 把刚追加进对话历史的那条消息写入会话日志。
+// persistLastMessage writes the most recently appended conversation message to the session log.
 //
-// 落盘点放在主循环而不是各个前端：TUI 和 Web 共用同一条记录路径，
-// 中间轮次的助手文本和完整的工具调用链都会被记下来，恢复会话时才能还原。
-// WorkDir 或 SessionID 为空时（一次性调用、子 Agent）跳过，不写盘。
+// Persistence lives in the main loop rather than in individual frontends: both TUI and Web share
+// the same recording path, ensuring intermediate assistant text and complete tool-call chains are
+// captured so sessions can be faithfully restored on resume. Skipped (no disk write) when WorkDir
+// or SessionID is empty (one-shot callers, sub-agents).
 func (a *Agent) persistLastMessage(conv *conversation.Manager) {
 	if a.WorkDir == "" || a.SessionID == "" {
 		return

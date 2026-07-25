@@ -1,8 +1,3 @@
-// 来源：公众号@小林coding
-// 后端八股网站：xiaolincoding.com
-// Agent网站：xiaolinnote.com
-// 简历模版：jianli.xiaolinnote.com
-
 package teams
 
 import (
@@ -14,13 +9,17 @@ import (
 	"time"
 )
 
-// TeamFile 是团队配置在磁盘上的形态，落在 <teamsBaseDir>/<slug>/config.json。
+// TeamFile is the on-disk representation of team configuration, stored at
+// <teamsBaseDir>/<slug>/config.json.
 //
-// 内存里的 Member 挂着 agent 实例、conversation 和 cancel 函数，这些都没法序列化，
-// 所以落盘的是另一份纯元信息的结构。两边靠成员名字对应。
+// The in-memory Member holds agent instances, conversations, and cancel
+// functions — none of which are serializable — so the persisted form is a
+// separate metadata-only structure. The two are correlated by member name.
 //
-// 这份文件解决的是跨进程和跨重启：窗格队员是独立进程，起来之后要知道自己在哪个团队、
-// 队友都有谁；用户重启 Swiftx 之后也得能接着用之前的团队。
+// This file solves cross-process and cross-restart concerns: pane teammates
+// are independent processes that need to know which team they belong to and
+// who their peers are; users restarting Swiftx must be able to resume
+// previously created teams.
 type TeamFile struct {
 	Name        string           `json:"name"`
 	Description string           `json:"description,omitempty"`
@@ -29,8 +28,9 @@ type TeamFile struct {
 	Members     []TeamMemberFile `json:"members"`
 }
 
-// TeamMemberFile 是单个成员的元信息。isActive 用指针是为了区分三种状态：
-// 没有这个字段表示刚注册还没开工，true 表示在跑，false 表示已空闲。
+// TeamMemberFile is the metadata for a single member. IsActive uses a pointer
+// to distinguish three states: nil means just registered and not yet started,
+// true means running, false means idle.
 type TeamMemberFile struct {
 	AgentID      string `json:"agentId"`
 	Name         string `json:"name"`
@@ -44,8 +44,11 @@ type TeamMemberFile struct {
 
 var nonAlnum = regexp.MustCompile(`[^a-zA-Z0-9]`)
 
-// sanitizeTeamName 把团队名压成可以直接当目录名的形式，非字母数字一律换成连字符再转小写。
-// 团队名是 LLM 起的，可能带空格、中文和标点，不处理会在不同文件系统上炸出各种问题。
+// sanitizeTeamName compresses a team name into a form usable as a directory
+// name: all non-alphanumeric characters are replaced with hyphens and
+// lowercased. Team names are chosen by the LLM and may contain spaces,
+// non-ASCII characters, and punctuation; without sanitization, various
+// filesystem issues would arise.
 func sanitizeTeamName(name string) string {
 	return strings.ToLower(nonAlnum.ReplaceAllString(name, "-"))
 }
@@ -54,8 +57,9 @@ func teamFilePath(name string) string {
 	return filepath.Join(teamDir(name), "config.json")
 }
 
-// ReadTeamFile 读取团队配置。文件不存在返回 (nil, nil)，让调用方按「没有这个团队」处理，
-// 而不是当成错误往上抛。
+// ReadTeamFile reads team configuration. Returns (nil, nil) when the file does
+// not exist, allowing the caller to treat it as "no such team" rather than
+// propagating an error.
 func ReadTeamFile(name string) (*TeamFile, error) {
 	data, err := os.ReadFile(teamFilePath(name))
 	if err != nil {
@@ -71,7 +75,7 @@ func ReadTeamFile(name string) (*TeamFile, error) {
 	return &tf, nil
 }
 
-// WriteTeamFile 写入团队配置，目录不存在会一并创建。
+// WriteTeamFile writes team configuration, creating the directory if needed.
 func WriteTeamFile(name string, tf *TeamFile) error {
 	dir := teamDir(name)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -84,8 +88,8 @@ func WriteTeamFile(name string, tf *TeamFile) error {
 	return os.WriteFile(teamFilePath(name), data, 0o644)
 }
 
-// snapshot 把内存里的 Team 导出成可落盘的 TeamFile。
-// 调用方需要自己持有 t.mu。
+// snapshot exports the in-memory Team into a persistable TeamFile.
+// The caller must hold t.mu.
 func (t *Team) snapshot() *TeamFile {
 	tf := &TeamFile{
 		Name:        t.Name,
@@ -113,9 +117,10 @@ func (t *Team) snapshot() *TeamFile {
 	return tf
 }
 
-// persist 把当前状态写回磁盘。写失败不影响内存里的团队继续工作，
-// 所以这里只吞掉错误：落盘是为了跨进程和跨重启，不是运行时的必要条件。
-// 调用方需要自己持有 t.mu。
+// persist writes the current state back to disk. Write failures do not affect
+// the in-memory team's continued operation, so errors are swallowed here:
+// persistence serves cross-process and cross-restart needs, not runtime
+// correctness. The caller must hold t.mu.
 func (t *Team) persist() {
 	_ = WriteTeamFile(t.Name, t.snapshot())
 }

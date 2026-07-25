@@ -41,9 +41,11 @@ const (
 	ModeTmux      TeamMode = "tmux"
 )
 
-// teamsBaseDir 是所有团队目录的根。放在用户主目录而不是项目目录下，
-// 因为窗格队员是独立进程、工作目录可能被 worktree 换掉，用主目录才能保证
-// 队员进程和 Lead 找到的是同一份团队配置。
+// teamsBaseDir is the root directory for all team directories. It lives under
+// the user's home directory rather than the project directory, because pane
+// teammates are independent processes whose working directory may be changed
+// by worktrees; using the home directory ensures both teammate processes and
+// the Lead find the same team configuration.
 func teamsBaseDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -64,8 +66,9 @@ type Member struct {
 	PaneID   string
 	Progress *TeammateProgress
 
-	// 以下几个是要落盘的元信息，运行时不参与调度，只在写 config.json
-	// 和从磁盘恢复团队时用到。
+	// The following fields are metadata for persistence; they do not
+	// participate in runtime scheduling and are only used when writing
+	// config.json and restoring a team from disk.
 	AgentID      string
 	AgentType    string
 	Model        string
@@ -80,7 +83,7 @@ type Team struct {
 	MailBox *FileMailBox
 	mu      sync.Mutex
 
-	// 落盘用的团队级元信息
+	// Team-level metadata for persistence.
 	LeadAgentID string
 	Description string
 	CreatedAt   int64
@@ -115,8 +118,9 @@ func (t *Team) AddMember(name string, client llm.Client, registry *tools.Registr
 	return member
 }
 
-// SetMemberMeta 补齐成员的元信息（agent 类型、模型、worktree 路径）并落盘。
-// spawn 流程拿到这些信息的时机晚于 AddMember，所以分成两步写。
+// SetMemberMeta fills in member metadata (agent type, model, worktree path)
+// and persists it. The spawn flow obtains this information later than
+// AddMember, so it is written in two steps.
 func (t *Team) SetMemberMeta(name, agentType, model, worktreePath string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -200,7 +204,7 @@ func (t *Team) SendMessage(from, to, content string) {
 type TeamManager struct {
 	mu         sync.Mutex
 	teams      map[string]*Team
-	taskStores map[string]*SharedTaskStore // 每团队一份共享任务库
+	taskStores map[string]*SharedTaskStore // one shared task store per team
 }
 
 func NewTeamManager() *TeamManager {
@@ -218,8 +222,9 @@ func (tm *TeamManager) CreateTeam(name string, mode TeamMode) *Team {
 	return tm.CreateTeamFull(name, mode, "", "")
 }
 
-// CreateTeamFull 建团队并记下 lead 和描述，随后把配置写进 config.json。
-// 落盘之后队员进程和下一次会话都能靠 GetTeam 把这个团队捞回来。
+// CreateTeamFull creates a team, records the lead and description, then writes
+// the configuration to config.json. Once persisted, teammate processes and
+// future sessions can recover the team via GetTeam.
 func (tm *TeamManager) CreateTeamFull(name string, mode TeamMode, leadAgentID, description string) *Team {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
@@ -227,7 +232,7 @@ func (tm *TeamManager) CreateTeamFull(name string, mode TeamMode, leadAgentID, d
 	team.LeadAgentID = leadAgentID
 	team.Description = description
 	tm.teams[name] = team
-	// 新建团队时初始化一份空的共享任务库
+	// Initialize an empty shared task store for the new team.
 	store := NewSharedTaskStore(filepath.Join(teamDir(name), "tasks.json"))
 	store.InitEmpty()
 	tm.taskStores[name] = store
@@ -235,7 +240,8 @@ func (tm *TeamManager) CreateTeamFull(name string, mode TeamMode, leadAgentID, d
 	return team
 }
 
-// GetTaskStore 获取团队的共享任务库；内存无缓存时（例如队友进程）从磁盘 tasks.json 加载。
+// GetTaskStore returns the team's shared task store; when not cached in memory
+// (e.g. in a teammate process), it loads from tasks.json on disk.
 func (tm *TeamManager) GetTaskStore(teamName string) *SharedTaskStore {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
@@ -257,9 +263,11 @@ func (tm *TeamManager) CreateTeamWith(team *Team) {
 	tm.teams[team.Name] = team
 }
 
-// GetTeam 先查内存，未命中再看磁盘上有没有 config.json。
-// 从磁盘重建出来的 Team 只带元信息，成员的 agent 实例和 conversation 都是空的，
-// 够 SendMessage 按名字投递和 UI 展示用；要真正让某个成员跑起来还得重新 spawn。
+// GetTeam checks memory first; on miss, looks for config.json on disk.
+// A Team reconstructed from disk carries only metadata — member agent
+// instances and conversations are empty — sufficient for SendMessage to
+// deliver by name and for UI display; actually running a member requires
+// re-spawning.
 func (tm *TeamManager) GetTeam(name string) *Team {
 	tm.mu.Lock()
 	defer tm.mu.Unlock()
@@ -303,14 +311,15 @@ func (tm *TeamManager) DeleteTeam(name string) {
 		registry := GetNameRegistry()
 		for memberName := range team.Members {
 			team.StopMember(memberName)
-			// 解绑该成员在全局名称注册表里的映射
+			// Unbind this member's mapping in the global name registry.
 			registry.Unregister(memberName)
 		}
 		delete(tm.teams, name)
 	}
 	delete(tm.taskStores, name)
-	// 团队目录里是 config.json、tasks.json 和收件箱，团队没了就一起清掉，
-	// 免得下次同名团队捞到上一次的残留
+	// The team directory contains config.json, tasks.json, and inboxes; once
+	// the team is gone, remove them all to prevent a future same-named team
+	// from picking up stale data.
 	_ = os.RemoveAll(teamDir(name))
 }
 

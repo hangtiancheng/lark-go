@@ -17,7 +17,7 @@ func resultFor(id, content string) Message {
 	}
 }
 
-// 配对完整时不应该有任何改动。
+// A fully paired history should not be modified at all.
 func TestEnsureToolPairingLeavesPairedHistoryAlone(t *testing.T) {
 	in := []Message{
 		{Role: "user", Content: "hi"},
@@ -33,7 +33,8 @@ func TestEnsureToolPairingLeavesPairedHistoryAlone(t *testing.T) {
 	}
 }
 
-// 工具调用没有结果时补一条错误结果，且必须紧跟在调用之后。
+// When a tool call has no result, an error result must be appended immediately
+// after the call.
 func TestEnsureToolPairingFillsDanglingToolUse(t *testing.T) {
 	in := []Message{
 		{Role: "user", Content: "hi"},
@@ -58,7 +59,7 @@ func TestEnsureToolPairingFillsDanglingToolUse(t *testing.T) {
 	}
 }
 
-// 一条消息里有多个调用时，每个都要补上。
+// When a single message contains multiple calls, every one must be filled in.
 func TestEnsureToolPairingFillsEveryToolUseInMessage(t *testing.T) {
 	in := []Message{{
 		Role: "assistant",
@@ -76,7 +77,7 @@ func TestEnsureToolPairingFillsEveryToolUseInMessage(t *testing.T) {
 	}
 }
 
-// 找不到对应调用的孤儿结果要被丢掉。
+// Orphan results with no matching call must be dropped.
 func TestEnsureToolPairingDropsOrphanResult(t *testing.T) {
 	in := []Message{
 		{Role: "user", Content: "hi"},
@@ -96,7 +97,8 @@ func TestEnsureToolPairingDropsOrphanResult(t *testing.T) {
 	}
 }
 
-// 已经补过的调用不能在后续消息里被重复补一遍。
+// A call that has already been filled in must not be filled again in later
+// messages.
 func TestEnsureToolPairingDoesNotDuplicate(t *testing.T) {
 	in := []Message{
 		assistantWithTool("t1", "Bash"),
@@ -116,7 +118,7 @@ func TestEnsureToolPairingDoesNotDuplicate(t *testing.T) {
 	}
 }
 
-// 输入不能被就地修改。
+// The input must not be mutated in place.
 func TestEnsureToolPairingDoesNotMutateInput(t *testing.T) {
 	in := []Message{assistantWithTool("t1", "Bash")}
 	_ = EnsureToolPairing(in)

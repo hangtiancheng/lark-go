@@ -35,7 +35,7 @@ func TestNewID(t *testing.T) {
 	if len(id) != 20 { // 20060102-150405-xxxx
 		t.Fatalf("unexpected ID format: %s (len=%d)", id, len(id))
 	}
-	// 同秒生成两个 ID 不应相同
+	// Two IDs generated within the same second must not be equal.
 	id2 := NewID()
 	if id == id2 {
 		t.Fatalf("two IDs generated in same second collided: %s", id)
@@ -267,14 +267,14 @@ func TestMatchesSearch(t *testing.T) {
 	}
 }
 
-// 工具块要能完整走一遍「落盘 → 读回 → 还原成对话消息」。
+// Tool blocks must survive a full round trip: persist → read back → restore into a conversation message.
 func TestToolBlocksRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	id := "tools"
 
 	assistant := conversation.Message{
 		Role:    "assistant",
-		Content: "先看看这个文件",
+		Content: "Let me take a look at this file first",
 		ToolUses: []conversation.ToolUseBlock{{
 			ToolUseID: "toolu_1",
 			ToolName:  "ReadFile",
@@ -317,7 +317,7 @@ func TestToolBlocksRoundTrip(t *testing.T) {
 	}
 }
 
-// 只带工具结果的消息本身没有文本，不能被按空内容过滤掉。
+// A message carrying only tool results has no text of its own and must not be filtered out as empty content.
 func TestLoadKeepsEmptyContentToolResult(t *testing.T) {
 	dir := t.TempDir()
 	id := "empty-content"
@@ -333,7 +333,7 @@ func TestLoadKeepsEmptyContentToolResult(t *testing.T) {
 	}
 }
 
-// 不含工具字段的旧会话文件要照常读出。
+// Legacy session files that lack the tool fields must still load normally.
 func TestLoadLegacyRecordsWithoutToolFields(t *testing.T) {
 	dir := t.TempDir()
 	id := "legacy"

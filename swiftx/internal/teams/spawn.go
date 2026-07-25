@@ -53,8 +53,9 @@ type TeammateSpawnConfig struct {
 
 	Workdir string
 
-	// Checker 是队友的权限检查器。Lead 派人时标了 plan_mode_required，
-	// 这里就是一个 ModePlan 的 checker，队友只能读不能改，直到计划获批。
+	// Checker is the teammate's permission checker. When the Lead marks
+	// plan_mode_required during dispatch, this is a ModePlan checker — the
+	// teammate can only read, not modify, until the plan is approved.
 	Checker *permissions.Checker
 }
 
@@ -81,7 +82,8 @@ func SpawnTeammate(ctx context.Context, cfg TeammateSpawnConfig) (*SpawnResult, 
 		return nil, fmt.Errorf("SpawnTeammate: member name is required")
 	}
 
-	// 把成员名字登记到全局名称注册表，供 SendMessage 按名字解析投递
+	// Register the member name in the global name registry so SendMessage can
+	// resolve and deliver by name.
 	GetNameRegistry().Register(cfg.MemberName, cfg.MemberName)
 
 	switch cfg.Team.Mode {

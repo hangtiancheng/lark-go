@@ -36,8 +36,9 @@ import (
 type LoadSkillTool struct {
 	Catalog *Catalog
 	Host    SkillHost
-	// ForkHost 提供运行隔离子 Agent 的能力，声明了 mode: fork 的 skill 依赖它。
-	// 为 nil 时（宿主未接入子 Agent 运行时）回退成 inline，保证工具在任何宿主上都能用。
+	// ForkHost provides the ability to run an isolated sub-agent; skills declaring
+	// mode: fork depend on it. When nil (the host has not wired up a sub-agent
+	// runtime) it falls back to inline, so the tool works on any host.
 	ForkHost SkillForkHost
 }
 
@@ -84,9 +85,10 @@ func (t *LoadSkillTool) Execute(ctx context.Context, args map[string]any) tools.
 		return tools.ToolResult{Output: fmt.Sprintf("skill %q has empty body — cannot activate", name), IsError: true}
 	}
 
-	// fork 模式：SOP 正文不进主对话，丢给隔离的子 Agent 执行，只把最终结果带回。
-	// 这样模型自己加载 skill 和用户敲斜杠命令遵循同一套 mode 语义，声明的隔离
-	// 意图在两条路径上都生效。
+	// Fork mode: the SOP body does not enter the main conversation; it is handed to an
+	// isolated sub-agent to execute, and only the final result is brought back. This way
+	// the model loading a skill itself and the user invoking a slash command follow the
+	// same mode semantics, and the declared isolation intent holds on both paths.
 	if skill.Meta.IsFork() && t.ForkHost != nil {
 		result, err := RunFork(ctx, skill, "", t.ForkHost)
 		if err != nil {

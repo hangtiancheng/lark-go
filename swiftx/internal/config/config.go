@@ -163,11 +163,11 @@ type MCPServerConfig struct {
 	Env       map[string]string `yaml:"env"`
 }
 
-// SandboxConfig 控制 OS 级沙箱的配置
+// SandboxConfig controls the OS-level sandbox configuration.
 type SandboxConfig struct {
-	Enabled        bool `yaml:"enabled"`         // 是否启用沙箱
-	AutoAllow      bool `yaml:"auto_allow"`      // 沙箱内命令是否自动放行
-	NetworkEnabled bool `yaml:"network_enabled"` // 是否允许网络访问
+	Enabled        bool `yaml:"enabled"`         // whether the sandbox is enabled
+	AutoAllow      bool `yaml:"auto_allow"`      // whether commands inside the sandbox are auto-approved
+	NetworkEnabled bool `yaml:"network_enabled"` // whether network access is permitted
 }
 
 type AppConfig struct {
@@ -178,12 +178,15 @@ type AppConfig struct {
 	Sandbox               SandboxConfig     `yaml:"sandbox"`
 	EnableCoordinatorMode bool              `yaml:"enable_coordinator_mode"`
 
-	// EnableFork 控制省略 subagent_type 时是否走 fork。用指针是因为它默认开着，
-	// 普通 bool 分不清「配置里没写」和「配置里写了 false」，后者就永远关不掉。
+	// EnableFork controls whether fork is used when subagent_type is omitted.
+	// It is a pointer because it defaults to enabled: a plain bool cannot
+	// distinguish "not set in config" from "explicitly set to false", and the
+	// latter would otherwise be impossible to turn off.
 	EnableFork *bool `yaml:"enable_fork"`
 }
 
-// ForkEnabled 返回 fork 是否可用。配置里没写就是开着。
+// ForkEnabled reports whether fork is available. It defaults to enabled when
+// the config does not specify a value.
 func (c *AppConfig) ForkEnabled() bool {
 	return c.EnableFork == nil || *c.EnableFork
 }
@@ -222,7 +225,7 @@ func mergeConfig(base, override *AppConfig) *AppConfig {
 		}
 	}
 	base.Hooks = append(base.Hooks, override.Hooks...)
-	// 沙箱配置：后加载的配置覆盖先前的
+	// Sandbox config: a later-loaded config overrides earlier ones.
 	if override.Sandbox.Enabled {
 		base.Sandbox = override.Sandbox
 	}

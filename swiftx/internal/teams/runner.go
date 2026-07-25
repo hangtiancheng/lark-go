@@ -127,20 +127,21 @@ func RunInProcessTeammate(
 			}
 		}
 
-		// 计划模式的队友：一轮跑完意味着它调了 ExitPlanMode，计划已经落到磁盘。
-		// 把计划交给 Lead 审批，通过了才解除只读限制开始动手。
+		// Plan-mode teammate: a completed turn means it called ExitPlanMode and
+		// the plan has been written to disk. Submit the plan to the Lead for
+		// approval; only lift the read-only restriction once approved.
 		if planModeActive(member) {
 			approved, feedback, err := requestPlanApproval(ctx, team, member)
 			if err != nil {
 				return err
 			}
 			if approved {
-				// 批准后切回正常权限，队友可以改文件了
+				// After approval, switch back to normal permissions so the teammate can modify files.
 				member.AgentRef.Checker.Mode = permissions.ModeDefault
-				nextPrompt = "Lead 已批准你的计划，现在按计划开始执行。"
+				nextPrompt = "The Lead has approved your plan. Begin execution now according to the plan."
 			} else {
-				// 驳回时留在计划模式，带着修改意见重写计划
-				nextPrompt = "Lead 驳回了你的计划，修改意见：" + feedback + "\n请据此修订计划后再次提交。"
+				// On rejection, stay in plan mode and rewrite the plan with the feedback.
+				nextPrompt = "The Lead rejected your plan. Revision feedback: " + feedback + "\nPlease revise the plan accordingly and resubmit."
 			}
 			continue
 		}
@@ -157,9 +158,11 @@ func RunInProcessTeammate(
 			return err
 		}
 		if shutdown != nil {
-			// 收工前先给 Lead 一个明确答复，让它知道可以回收窗格了。
-			// 队友这里一律同意：它已经处在空闲轮询里，手上没有干到一半的活。
-			// 真正需要拒绝的场景是干活干到一半被打断，那种情况下队友根本轮询不到这条消息。
+			// Before wrapping up, give the Lead an explicit acknowledgment so it
+			// knows the pane can be reclaimed. Teammates always agree here: they
+			// are already in idle polling with no work in progress. The real
+			// refusal scenario is being interrupted mid-task, in which case the
+			// teammate would never reach this polling point.
 			if shutdown.Type == MsgShutdownRequest {
 				_ = team.MailBox.Send(LeadName,
 					NewShutdownResponse(member.Name, shutdown.RequestID, true, "acknowledged, shutting down"))
@@ -173,18 +176,22 @@ func RunInProcessTeammate(
 // waitForNextPromptOrShutdown blocks until the inbox has at least one message, then turns the
 // unread batch into the next user prompt. If any message is a shutdown request, the function
 // returns shutdown=true without building a prompt.
-// planModeActive 判断队友是否处在计划模式。只有被 Lead 标了 planModeRequired
-// 的队友才会进这个模式，普通队友直接干活。
+// planModeActive reports whether a teammate is in plan mode. Only teammates
+// marked with planModeRequired by the Lead enter this mode; regular teammates
+// work directly.
 func planModeActive(member *Member) bool {
 	return member.AgentRef != nil &&
 		member.AgentRef.Checker != nil &&
 		member.AgentRef.Checker.Mode == permissions.ModePlan
 }
 
-// requestPlanApproval 把队友写好的计划发给 Lead，然后阻塞等待批复。
+// requestPlanApproval sends the teammate's completed plan to the Lead and
+// blocks until a decision is received.
 //
-// 队友这时候手上是只读权限，等多久都不会造成破坏，所以这里不设超时：
-// 与其超时后自作主张开始改文件，不如一直等着，由用户从 Lead 那边推进。
+// The teammate holds read-only permissions at this point, so waiting
+// indefinitely causes no harm; no timeout is set here. Rather than timing out
+// and presumptuously starting to modify files, it is better to wait and let
+// the user drive progress from the Lead side.
 func requestPlanApproval(ctx context.Context, team *Team, member *Member) (bool, string, error) {
 	plan := readPlanForReview(member)
 	req := NewPlanApprovalRequest(member.Name, plan)
@@ -207,7 +214,8 @@ func requestPlanApproval(ctx context.Context, team *Team, member *Member) (bool,
 			return false, "", err
 		}
 		for _, m := range msgs {
-			// 只认对应这次请求的批复，别的消息留到下一轮再处理
+			// Only accept the response matching this request; leave other
+			// messages for the next turn.
 			if m.Type == MsgPlanApprovalResponse && m.RequestID == req.RequestID {
 				_ = team.MailBox.MarkAllRead(member.Name)
 				return m.Approved(), m.Text, nil
@@ -216,7 +224,7 @@ func requestPlanApproval(ctx context.Context, team *Team, member *Member) (bool,
 	}
 }
 
-// readPlanForReview 读出队友写好的计划全文，交给 Lead 审阅。
+// readPlanForReview reads the full plan written by the teammate for the Lead to review.
 func readPlanForReview(member *Member) string {
 	workDir := ""
 	if member.AgentRef != nil {
@@ -225,7 +233,7 @@ func readPlanForReview(member *Member) string {
 	path := plan_file.GetOrCreatePlanPath(workDir)
 	data, err := os.ReadFile(path)
 	if err != nil || len(data) == 0 {
-		return "（计划文件为空，队友可能未按要求写入计划）"
+		return "(plan file is empty; the teammate may not have written the plan as required)"
 	}
 	return string(data)
 }

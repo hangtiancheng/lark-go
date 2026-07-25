@@ -157,8 +157,8 @@ body`), 0o644)
 	}
 }
 
-// 渲染结果只跟正文和参数有关，与 mode 无关：fork 的 Skill 拿到的也是同一份正文，
-// 隔离执行由调用方负责。
+// The render result depends only on the body and the arguments, not on the mode: a fork
+// skill receives the exact same body, and isolated execution is the caller's responsibility.
 func TestSkillRenderIgnoresMode(t *testing.T) {
 	forked := &Skill{
 		Meta:       SkillMeta{Name: "audit-deps", Context: "fork"},

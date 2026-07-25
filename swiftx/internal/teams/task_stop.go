@@ -1,8 +1,3 @@
-// 来源：公众号@小林coding
-// 后端八股网站：xiaolincoding.com
-// Agent网站：xiaolinnote.com
-// 简历模版：jianli.xiaolinnote.com
-
 package teams
 
 import (
@@ -13,11 +8,14 @@ import (
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/tools"
 )
 
-// TaskStopTool 中止一个在跑的队员。
-// Coordinator 派错方向时用它及时止损，不用等队员把错的活干完。
+// TaskStopTool stops a running teammate.
+// The Coordinator uses it to cut losses when a teammate was sent in the wrong
+// direction, without waiting for it to finish the incorrect work.
 //
-// 接的是 TeamManager 而不是后台任务表：coordinator 模式下 Lead 通过 Agent 工具
-// 加 team_name 派出去的是队员，由 Team 持有它们的 Cancel，后台任务表里没有它们。
+// It connects to TeamManager rather than the background task board: in
+// coordinator mode the Lead dispatches teammates via the Agent tool with
+// team_name; the Team holds their Cancel functions, and they do not exist in
+// the background task board.
 type TaskStopTool struct {
 	TeamMgr *TeamManager
 }
@@ -57,7 +55,9 @@ func (t *TaskStopTool) Execute(ctx context.Context, args map[string]any) tools.T
 		return tools.ToolResult{Output: "Error: team manager unavailable", IsError: true}
 	}
 
-	// 队员名在团队之间可能重名，只在存在该成员的团队里停，避免误杀同名队员
+	// Teammate names may be duplicated across teams; only stop in the team
+	// that actually contains this member to avoid killing a same-named
+	// teammate in another team.
 	for _, teamName := range t.TeamMgr.ListTeams() {
 		team := t.TeamMgr.GetTeam(teamName)
 		if team == nil {
@@ -84,7 +84,8 @@ func (t *TaskStopTool) Execute(ctx context.Context, args map[string]any) tools.T
 	}
 }
 
-// knownMembers 把当前所有队员名列给模型，省得它照着记错的名字反复重试
+// knownMembers lists all current teammate names for the model, preventing it
+// from retrying endlessly with a misremembered name.
 func (t *TaskStopTool) knownMembers() string {
 	var names []string
 	for _, teamName := range t.TeamMgr.ListTeams() {

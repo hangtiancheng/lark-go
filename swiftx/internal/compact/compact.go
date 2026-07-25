@@ -24,9 +24,10 @@
 // message + a continuation acknowledgement. Also reachable via ForceCompact
 // (the /compact slash command).
 //
-// Layer 1（工具结果预算）在 package toolresult：单条超限和单消息聚合
-// 超限都在结果进入对话历史那一刻处理完，消息一进历史就是终态，这里
-// 拿到的消息大小即最终大小。
+// Layer 1 (tool-result budget) lives in package toolresult: both single-result
+// overruns and per-message aggregate overruns are handled at the moment a
+// result enters the conversation history. Once a message is in history it is
+// in its final form, so the message sizes observed here are the final sizes.
 
 package compact
 
@@ -248,9 +249,9 @@ func ComputeUsedTokens(messages []conversation.Message, anchor UsageAnchor) int 
 	return anchor.BaselineTokens + EstimateTokens(messages[anchor.AnchorCount:])
 }
 
-// ComputeUsedTokensFromConv 从 ConversationManager 读取锚点状态来计算
-// 当前 token 用量。这是 ComputeUsedTokens 的便捷封装，避免调用方
-// 手动传递 UsageAnchor 参数。
+// ComputeUsedTokensFromConv reads the anchor state from the ConversationManager
+// to compute the current token usage. It is a convenience wrapper around
+// ComputeUsedTokens that spares callers from passing the UsageAnchor manually.
 func ComputeUsedTokensFromConv(conv *conversation.Manager) int {
 	baseline, count, has := conv.UsageAnchorState()
 	return ComputeUsedTokens(conv.GetMessages(), UsageAnchor{
@@ -294,8 +295,9 @@ func ManageContext(
 	recovery *RecoveryState,
 	toolSchemas []map[string]any,
 ) (string, error) {
-	// 历史里的工具结果在入历史时已按预算处理为终态，conv 自身消息
-	// 就是实际发送量，直接用它估算。
+	// Tool results in history were already budgeted to their final size at
+	// ingest time, so conv's own messages reflect the actual payload sent;
+	// estimate directly from them.
 	baseline, count, has := conv.UsageAnchorState()
 	anchor := UsageAnchor{BaselineTokens: baseline, AnchorCount: count, HasUsage: has}
 	tokens := ComputeUsedTokens(conv.GetMessages(), anchor)
@@ -533,8 +535,9 @@ func autoCompact(
 	prefix := messages[:keepStart]
 	keep := messages[keepStart:]
 
-	// 调用 LLM 生成摘要，带 PTL 重试：如果摘要请求本身超出上下文窗口，
-	// 从最老的 API 轮次开始丢弃，最多重试 maxPTLRetries 次。
+	// Invoke the LLM to produce the summary, with PTL retry: if the summary
+	// request itself exceeds the context window, drop the oldest API rounds
+	// and retry, up to maxPTLRetries times.
 	finalSummary, err := callSummaryWithPTLRetry(ctx, client, prefix, toolSchemas)
 	if err != nil {
 		return "", err
@@ -557,12 +560,12 @@ func autoCompact(
 		session.SaveCompactBoundary(workDir, sessionID, finalSummary, keepRecords)
 	}
 
-	content := "本次会话延续自之前的对话，因上下文空间不足进行了压缩。以下是早期对话的摘要：\n\n" + finalSummary
+	content := "This session continues a previous conversation that was compacted because the context window was running low. Below is a summary of the earlier conversation:\n\n" + finalSummary
 	if len(keep) > 0 {
-		content += "\n\n近期消息已原样保留。"
+		content += "\n\nRecent messages have been preserved verbatim."
 	}
 	if sessionID != "" && workDir != "" {
-		content += fmt.Sprintf("\n\n如果你需要压缩前的具体细节（代码片段、报错信息等），请用 ReadFile 读取完整会话记录：%s", session.SessionFilePath(workDir, sessionID))
+		content += fmt.Sprintf("\n\nIf you need specifics from before the compaction (code snippets, error messages, etc.), use ReadFile to load the full session log: %s", session.SessionFilePath(workDir, sessionID))
 	}
 	if attachment := BuildRecoveryAttachment(recovery, toolSchemas); attachment != "" {
 		content += "\n\n---\n\n" + attachment

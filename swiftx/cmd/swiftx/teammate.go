@@ -109,13 +109,15 @@ func runTeammate(args teammateArgs) error {
 		registry.Register(t)
 	}
 
-	// 队员进程直接从磁盘上的 config.json 把团队捞回来，这样它看到的队友名单
-	// 和 Lead 那边是同一份。团队目录在用户主目录下，不受 worktree 换工作目录影响。
+	// The teammate process loads the team directly from config.json on disk so it
+	// sees the same member list as the lead. The team directory lives under the
+	// user's home directory and is unaffected by worktree directory changes.
 	teamMgr := teams.NewTeamManager()
 	team := teamMgr.GetTeam(args.teamName)
 	if team == nil {
-		// 配置还没落盘（例如 Lead 刚建完团队就 spawn），退化成本地构造一份，
-		// 邮箱目录按同样的约定拼出来，投递仍然对得上。
+		// Config hasn't been persisted yet (e.g., lead spawns immediately after
+		// creating the team); fall back to constructing a local copy. The mailbox
+		// directory follows the same convention so delivery still matches.
 		team = teams.NewTeam(args.teamName, teams.ModeInProcess)
 		teamMgr.CreateTeamWith(team)
 	}

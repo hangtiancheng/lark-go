@@ -599,7 +599,8 @@ The full path should be .swiftx/skills/<skill-name>/SKILL.md.
 				llm.TextDelta{Text: "I'll create a git-helper skill for you."},
 				llm.ToolCallStart{ToolName: "Bash", ToolID: "b1"},
 				llm.ToolCallComplete{ToolID: "b1", ToolName: "Bash", Arguments: map[string]any{
-					// 走 shell 执行，路径统一成正斜杠并加引号，避免 Windows 反斜杠被 shell 当转义符吃掉
+					// Executed via shell; normalize the path to forward slashes and quote it so
+					// Windows backslashes are not treated as shell escape characters.
 					"command": fmt.Sprintf("mkdir -p '%s'", filepath.ToSlash(newSkillDir)),
 				}},
 				llm.StreamEnd{StopReason: "tool_use"},

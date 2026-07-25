@@ -1,8 +1,3 @@
-// 来源：公众号@小林coding
-// 后端八股网站：xiaolincoding.com
-// Agent网站：xiaolinnote.com
-// 简历模版：jianli.xiaolinnote.com
-
 package teams
 
 import (
@@ -16,19 +11,24 @@ import (
 )
 
 const (
-	// lockAcquireTimeout 是等待文件锁的总时限。到点返回错误交给调用方处理，
-	// 不能悄悄把这条消息扔掉。
+	// lockAcquireTimeout is the total time limit for waiting on the file lock.
+	// On timeout, return an error for the caller to handle — never silently
+	// discard the message.
 	lockAcquireTimeout = 5 * time.Second
-	// staleLockAge 超过这个时长的锁文件视为持有者已经崩溃，可以强行接管。
+	// staleLockAge: a lock file older than this duration is considered
+	// abandoned by a crashed holder and may be forcibly taken over.
 	staleLockAge = 10 * time.Second
-	// maxLockBackoff 限制退避上限，避免高并发下越退越久。
+	// maxLockBackoff caps the backoff to prevent unbounded growth under high
+	// concurrency.
 	maxLockBackoff = 80 * time.Millisecond
 )
 
 type FileMailBox struct {
 	baseDir string
-	// 同进程内的并发直接用内存锁串行化，文件锁只负责隔离独立进程的 teammate。
-	// 省掉一轮文件系统争抢，也避免同进程的 goroutine 互相把重试预算耗光。
+	// Intra-process concurrency is serialized with an in-memory lock; the file
+	// lock only isolates teammates in separate processes. This avoids a round
+	// of filesystem contention and prevents same-process goroutines from
+	// exhausting each other's retry budget.
 	mu sync.Mutex
 }
 
@@ -39,15 +39,16 @@ type FileMailMessage struct {
 	Read      bool   `json:"read"`
 	Color     string `json:"color,omitempty"`
 
-	// 结构化消息用的三个字段，普通文本消息留空。
-	// Type 见 protocol.go 里的 Msg* 常量；RequestID 让应答能对上请求；
-	// Approve 用指针是为了区分「没表态」和「明确拒绝」。
+	// Three fields for structured messages; left empty for plain text messages.
+	// Type: see the Msg* constants in protocol.go; RequestID: allows responses
+	// to be matched to requests; Approve uses a pointer to distinguish "no
+	// response" from "explicitly rejected".
 	Type      string `json:"type,omitempty"`
 	RequestID string `json:"requestId,omitempty"`
 	Approve   *bool  `json:"approve,omitempty"`
 }
 
-// NewFileMailMessage 构造一条普通文本消息，时间戳按 RFC3339Nano 记。
+// NewFileMailMessage constructs a plain text message with an RFC3339Nano timestamp.
 func NewFileMailMessage(from, text string) FileMailMessage {
 	return FileMailMessage{
 		From:      from,
@@ -109,8 +110,10 @@ func (mb *FileMailBox) withLock(agentID string, fn func([]FileMailMessage) ([]Fi
 
 	lockFile := mb.lockPath(agentID)
 
-	// 抢文件锁：退避时间指数增长并带抖动，避免多个进程醒在同一时刻反复对撞。
-	// 总时限内抢不到就返回错误，让调用方知道这条消息没写进去。
+	// Acquire the file lock: backoff grows exponentially with jitter to avoid
+	// multiple processes waking at the same instant and colliding repeatedly.
+	// If the lock cannot be acquired within the total time limit, return an
+	// error so the caller knows the message was not written.
 	var lockFd *os.File
 	var err error
 	deadline := time.Now().Add(lockAcquireTimeout)
@@ -123,7 +126,7 @@ func (mb *FileMailBox) withLock(agentID string, fn func([]FileMailMessage) ([]Fi
 		if !os.IsExist(err) {
 			return err
 		}
-		// 锁被别人持有，先看它是不是已经陈旧到可以接管
+		// Lock is held by another process; check if it is stale enough to take over.
 		if info, statErr := os.Stat(lockFile); statErr == nil {
 			if time.Since(info.ModTime()) > staleLockAge {
 				os.Remove(lockFile)
@@ -131,7 +134,7 @@ func (mb *FileMailBox) withLock(agentID string, fn func([]FileMailMessage) ([]Fi
 			}
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("mailbox %s: 等待文件锁超过 %s，消息未写入", agentID, lockAcquireTimeout)
+			return fmt.Errorf("mailbox %s: waited for file lock longer than %s, message not written", agentID, lockAcquireTimeout)
 		}
 		time.Sleep(backoff + time.Duration(rand.Int63n(int64(backoff))))
 		if backoff < maxLockBackoff {

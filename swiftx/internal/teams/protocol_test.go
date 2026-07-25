@@ -7,93 +7,93 @@ import (
 )
 
 func TestShutdownRequestRecognized(t *testing.T) {
-	// 结构化的关闭请求
-	req := NewShutdownRequest(LeadName, "收工")
+	// Structured shutdown request
+	req := NewShutdownRequest(LeadName, "wrapping up")
 	if req.Type != MsgShutdownRequest {
-		t.Errorf("Type = %q，期望 %q", req.Type, MsgShutdownRequest)
+		t.Errorf("Type = %q, want %q", req.Type, MsgShutdownRequest)
 	}
 	if req.RequestID == "" {
-		t.Error("关闭请求必须带 RequestID，否则应答对不上")
+		t.Error("shutdown request must carry a RequestID, otherwise responses cannot be matched")
 	}
 	if !IsShutdownRequest(req) {
-		t.Error("结构化关闭请求应被识别")
+		t.Error("structured shutdown request should be recognized")
 	}
 
-	// 纯文本前缀同样要认，窗格队友可能是旧版本进程
+	// Plain text prefix must also be recognized; pane teammates may be older-version processes.
 	legacy := NewFileMailMessage(LeadName, "[shutdown] stop")
 	if !IsShutdownRequest(legacy) {
-		t.Error("[shutdown] 文本前缀应被识别")
+		t.Error("[shutdown] text prefix should be recognized")
 	}
 
-	// 普通消息不能被误判
-	normal := NewFileMailMessage(LeadName, "继续改 auth 模块")
+	// Normal messages must not be misidentified.
+	normal := NewFileMailMessage(LeadName, "keep working on the auth module")
 	if IsShutdownRequest(normal) {
-		t.Error("普通消息被误判成关闭请求")
+		t.Error("normal message was misidentified as a shutdown request")
 	}
 }
 
 func TestShutdownResponseCarriesDecision(t *testing.T) {
-	req := NewShutdownRequest(LeadName, "收工")
+	req := NewShutdownRequest(LeadName, "wrapping up")
 
 	yes := NewShutdownResponse("alice", req.RequestID, true, "done")
 	if !yes.Approved() {
-		t.Error("同意的应答 Approved() 应为 true")
+		t.Error("an approving response should have Approved() == true")
 	}
 	if yes.RequestID != req.RequestID {
-		t.Errorf("应答的 RequestID = %q，应原样带回 %q", yes.RequestID, req.RequestID)
+		t.Errorf("response RequestID = %q, should echo back %q", yes.RequestID, req.RequestID)
 	}
 
-	no := NewShutdownResponse("alice", req.RequestID, false, "还在跑测试")
+	no := NewShutdownResponse("alice", req.RequestID, false, "still running tests")
 	if no.Approved() {
-		t.Error("拒绝的应答 Approved() 应为 false")
+		t.Error("a rejecting response should have Approved() == false")
 	}
 
-	// 没表态时按不拒绝处理，不能当成点头
+	// When no decision is expressed, treat as not-approved; never treat silence as consent.
 	silent := NewFileMailMessage("alice", "")
 	if silent.Approved() {
-		t.Error("没有 Approve 字段时不应视为同意")
+		t.Error("should not be treated as approved when Approve field is absent")
 	}
 }
 
 func TestPlanApprovalRoundTrip(t *testing.T) {
-	req := NewPlanApprovalRequest("alice", "1. 先读 auth 包\n2. 抽出接口")
+	req := NewPlanApprovalRequest("alice", "1. Read the auth package\n2. Extract the interface")
 	if req.Type != MsgPlanApprovalRequest || req.RequestID == "" {
-		t.Fatalf("计划请求构造有误：%+v", req)
+		t.Fatalf("plan request constructed incorrectly: %+v", req)
 	}
-	if !strings.Contains(req.Text, "抽出接口") {
-		t.Error("计划全文应放在 Text 里")
+	if !strings.Contains(req.Text, "Extract the interface") {
+		t.Error("full plan should be placed in Text")
 	}
 
-	rej := NewPlanApprovalResponse(LeadName, req.RequestID, false, "别动 handler 层")
+	rej := NewPlanApprovalResponse(LeadName, req.RequestID, false, "do not touch the handler layer")
 	if rej.Approved() {
-		t.Error("驳回的批复不应为同意")
+		t.Error("a rejection should not be approved")
 	}
-	if rej.Text != "别动 handler 层" {
-		t.Errorf("驳回意见应放在 Text 里，实际 %q", rej.Text)
+	if rej.Text != "do not touch the handler layer" {
+		t.Errorf("rejection feedback should be in Text, got %q", rej.Text)
 	}
 	if rej.RequestID != req.RequestID {
-		t.Error("批复必须带回原请求的 RequestID")
+		t.Error("response must echo back the original request's RequestID")
 	}
 }
 
 func TestTypedFieldsSurviveJSON(t *testing.T) {
-	// 邮箱是落盘的，字段必须能原样穿过一次序列化
-	req := NewShutdownRequest(LeadName, "收工")
-	resp := NewShutdownResponse("alice", req.RequestID, false, "还没跑完")
+	// The mailbox is persisted to disk; fields must survive a serialization round-trip.
+	req := NewShutdownRequest(LeadName, "wrapping up")
+	resp := NewShutdownResponse("alice", req.RequestID, false, "not finished yet")
 
 	data, err := json.Marshal(resp)
 	if err != nil {
-		t.Fatalf("序列化失败：%v", err)
+		t.Fatalf("serialization failed: %v", err)
 	}
 	var got FileMailMessage
 	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatalf("反序列化失败：%v", err)
+		t.Fatalf("deserialization failed: %v", err)
 	}
 	if got.Type != MsgShutdownResponse || got.RequestID != req.RequestID {
-		t.Errorf("类型或请求 ID 没穿过序列化：%+v", got)
+		t.Errorf("type or request ID did not survive serialization: %+v", got)
 	}
 	if got.Approve == nil || *got.Approve {
-		t.Errorf("Approve=false 没穿过序列化：%+v", got.Approve)
+		t.Errorf("Approve=false did not survive serialization: %+v", got.Approve)
 	}
 }
 
@@ -102,7 +102,7 @@ func TestRequestIDsAreUnique(t *testing.T) {
 	for i := 0; i < 200; i++ {
 		id := NewRequestID()
 		if seen[id] {
-			t.Fatalf("请求 ID 撞了：%s", id)
+			t.Fatalf("request ID collision: %s", id)
 		}
 		seen[id] = true
 	}

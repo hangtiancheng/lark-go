@@ -67,8 +67,8 @@ type usageInfo struct {
 	OutputTokens int `json:"output_tokens"`
 }
 
-// parsePrintFlags 从命令行参数中解析 -p/--print 模式相关参数
-// 返回 prompt, outputFormat, ok
+// parsePrintFlags parses -p/--print mode arguments from the command line.
+// Returns prompt, outputFormat, ok.
 func parsePrintFlags(args []string) (string, string, bool) {
 	isPrint := false
 	outputFormat := "text"
@@ -126,7 +126,7 @@ func runPrint(userPrompt string, cfg *config.AppConfig, hookCfgs []hooks.Hook, o
 
 	llm.ResolveContextWindow(context.Background(), p)
 
-	// 注册工具
+	// Register tools
 	taskMgr := subagent.NewTaskManager()
 	store := todo.NewStore(wd, sessionID)
 	todoList := todo.NewTaskList(store)
@@ -139,7 +139,7 @@ func runPrint(userPrompt string, cfg *config.AppConfig, hookCfgs []hooks.Hook, o
 	registry.Register(&todo.TaskUpdateTool{List: todoList})
 	registry.Register(&tools.ToolSearchTool{Registry: registry, Protocol: p.Protocol})
 
-	// 团队工具在 -p 模式下同样可用，Lead 能在一次非交互执行里组建团队把活派出去
+	// Team tools are also available in -p mode; the lead can assemble a team and delegate work in a single non-interactive run
 	teamMgr := teams.NewTeamManager()
 	registry.Register(&teams.TeamCreateTool{TeamMgr: teamMgr})
 	registry.Register(&teams.TeamDeleteTool{TeamMgr: teamMgr})
@@ -169,7 +169,7 @@ func runPrint(userPrompt string, cfg *config.AppConfig, hookCfgs []hooks.Hook, o
 	ag.FileHistory = fh
 	ag.SetSessionID(sessionID)
 
-	// print 模式自动允许所有权限
+	// Print mode automatically bypasses all permission checks
 	sandboxAllow := []string{memory.GetAutoMemPath(wd)}
 	if userMem := memory.GetUserAutoMemPath(); userMem != "" {
 		sandboxAllow = append(sandboxAllow, userMem)
@@ -188,7 +188,7 @@ func runPrint(userPrompt string, cfg *config.AppConfig, hookCfgs []hooks.Hook, o
 		ag.Hooks = eng
 	}
 
-	// 队员干完活的回传落在 lead 信箱里，每轮排空成 system-reminder 交给 Lead
+	// Completed teammate responses land in the lead's mailbox; drained each turn as system-reminders for the lead
 	ag.NotificationFn = func() []string {
 		return teams.DrainLeadMailbox(teamMgr)
 	}
@@ -203,7 +203,7 @@ func runPrint(userPrompt string, cfg *config.AppConfig, hookCfgs []hooks.Hook, o
 	registry.Register(&tools.EnterWorktreeTool{SessionID: sessionID, RepoRoot: gitRoot})
 	registry.Register(&tools.ExitWorktreeTool{RepoRoot: gitRoot})
 
-	// 执行
+	// Execute
 	conv.AddUserMessage(userPrompt)
 	ctx := context.Background()
 	ch := ag.Run(ctx, conv)

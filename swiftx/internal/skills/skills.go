@@ -45,8 +45,10 @@ type Skill struct {
 // Render returns the skill body with $ARGUMENTS substituted. If the body has no $ARGUMENTS
 // placeholder and args is non-empty, the args are appended in a "## User Request" section.
 //
-// 执行方式由 Meta.Mode 决定，不体现在渲染结果里：inline 的正文直接进主对话，
-// fork 的正文由调用方交给隔离子 Agent，两条路径拿到的都是这里渲染出的同一份文本。
+// The execution mode is determined by Meta.Mode and is not reflected in the rendered
+// result: an inline skill's body goes straight into the main conversation, while a fork
+// skill's body is handed by the caller to an isolated sub-agent. Both paths receive the
+// same text rendered here.
 func (s *Skill) Render(args string) string {
 	body := s.PromptBody
 	if strings.Contains(body, "$ARGUMENTS") {
