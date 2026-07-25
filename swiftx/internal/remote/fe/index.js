@@ -20,9 +20,9 @@
  * SOFTWARE.
  */
 
-// First: cd resolve(__filepath, ../../../../../swiftx-cli)
+// First: cd resolve(__filepath, ../../../../../swifty-cli)
 // Second: run `pnpm install`, then `pnpm fe:build`
-// Third: cp dist (/path/to/swiftx-cli/apps/swiftx/src/remote/fe/dist) to dirname(__filepath) (/path/to/swiftx.go/swiftx_cli/internal/remote/fe)
+// Third: cp dist (/path/to/swifty-cli/apps/swifty/src/remote/fe/dist) to dirname(__filepath) (/path/to/swifty.go/swifty_cli/internal/remote/fe)
 
 import path from "node:path";
 import fs from "node:fs";
@@ -32,14 +32,14 @@ import { fileURLToPath } from "node:url";
 /** @type {string} Directory containing this script. */
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/** @type {string} Root of the swiftx-cli repository (sibling of swiftx.go). */
-const swiftxCliRoot = path.resolve(__dirname, "../../../../..", "swiftx-cli");
+/** @type {string} Root of the swifty-cli repository (sibling of swifty.go). */
+const swiftyCliRoot = path.resolve(__dirname, "../../../../..", "swifty-cli");
 
 /** @type {string} Package dir that owns the `fe:build` script. */
-const swiftxAppDir = path.join(swiftxCliRoot, "apps", "swiftx");
+const swiftyAppDir = path.join(swiftyCliRoot, "apps", "swifty");
 
 /** @type {string} Build output produced by `pnpm fe:build`. */
-const distDir = path.join(swiftxAppDir, "src", "remote", "fe", "dist");
+const distDir = path.join(swiftyAppDir, "src", "remote", "fe", "dist");
 
 /** @type {string} Destination dist dir next to this script. */
 const targetDir = path.join(__dirname, "dist");
@@ -71,17 +71,17 @@ function run(command, args, cwd) {
 }
 
 /**
- * Build the swiftx-cli frontend and copy its dist into this directory.
+ * Build the swifty-cli frontend and copy its dist into this directory.
  * @returns {void}
  */
 function main() {
-  if (!fs.existsSync(swiftxCliRoot)) {
-    console.error(`swiftx-cli repo not found at ${swiftxCliRoot}`);
+  if (!fs.existsSync(swiftyCliRoot)) {
+    console.error(`swifty-cli repo not found at ${swiftyCliRoot}`);
     process.exit(1);
   }
 
-  run("pnpm", ["install"], swiftxCliRoot);
-  run("pnpm", ["fe:build"], swiftxAppDir);
+  run("pnpm", ["install"], swiftyCliRoot);
+  run("pnpm", ["fe:build"], swiftyAppDir);
 
   if (!fs.existsSync(distDir)) {
     console.error(`Build output not found at ${distDir}`);
