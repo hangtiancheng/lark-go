@@ -1,16 +1,6 @@
 go 1.26.4
 
 use (
-	./demo/consistent_cache
-	./demo/consistent_hash
-	./demo/lsm_tree
-	./demo/raft_demo
-	./demo/red_mq
-	./demo/redis_demo
-	./demo/redis_lock
-	./demo/tcc_demo
-	./demo/time_wheel
-	./demo/timer_demo
 	./swiftx
 	./swifty_agent
 	./swifty_cache
