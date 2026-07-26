@@ -7,6 +7,8 @@
   "author": "https://github.com/hangtiancheng",
   "type": "module",
   "scripts": {
+    "lint": "go list -f '{{.Dir}}/...' -m | xargs golangci-lint run",
+    "lint:fix": "go list -f '{{.Dir}}/...' -m | xargs golangci-lint run --fix",
     "tag": "node tag.js",
     "add:licenses": "node scripts/add_licenses.js",
     "build:swifty": "node scripts/build_swifty.js",
