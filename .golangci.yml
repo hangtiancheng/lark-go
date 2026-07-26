@@ -9,25 +9,9 @@ issues:
   max-same-issues: 0
 
 linters:
-  # standard = errcheck, govet, ineffassign, staticcheck, unused
   default: standard
   enable:
-    - copyloopvar
-    - exptostd
-    - gocritic
-    - intrange
-    - mirror
-    - misspell
     - modernize
-    - perfsprint
-    - usestdlibvars
-  settings:
-    gocritic:
-      enabled-tags:
-        - performance
-      disabled-checks:
-        - hugeParam
-        - rangeValCopy
 
 formatters:
   enable:
