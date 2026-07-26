@@ -51,8 +51,9 @@ func NewAgentLoader(workDir string) *AgentLoader {
 	}
 }
 
-// getBuiltinSpecs 返回内建的 Agent 定义。验证型 Agent 默认不开，由
-// SWIFTX_VERIFICATION_AGENT 环境变量控制，需要时才加进来。
+// getBuiltinSpecs returns the built-in agent definitions. The verification
+// agent is off by default; it is gated by the SWIFTX_VERIFICATION_AGENT
+// environment variable and only added when enabled.
 func getBuiltinSpecs() map[string]SubAgentSpec {
 	result := make(map[string]SubAgentSpec, len(BuiltinSpecs)+1)
 	maps.Copy(result, BuiltinSpecs)

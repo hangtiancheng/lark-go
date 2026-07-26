@@ -119,8 +119,9 @@ func runTeammate(args teammateArgs) error {
 		cancel()
 	}()
 
-	// Skill 目录既要进系统提示词让模型知道有哪些技能可用，也要挂到 LoadSkill
-	// 工具上供模型按名字加载。
+	// The skill catalog serves two purposes: it goes into the system prompt so
+	// the model knows which skills are available, and it backs the LoadSkill
+	// tool so the model can load a skill by name.
 	skillCatalog := skills.LoadCatalog(wd)
 	env := prompt.DetectEnvironment(wd)
 	env.Model = provider.Model
@@ -133,13 +134,15 @@ func runTeammate(args teammateArgs) error {
 		return fmt.Errorf("create LLM client: %w", err)
 	}
 
-	// 队员进程直接从磁盘上的 config.json 把团队捞回来，这样它看到的队友名单
-	// 和 Lead 那边是同一份。团队目录在用户主目录下，不受 worktree 换工作目录影响。
+	// The teammate process loads the team straight from config.json on disk so
+	// it sees the same member roster as the lead. The team directory lives under
+	// the user's home directory and is unaffected by worktree directory changes.
 	teamMgr := teams.NewTeamManager()
 	team := teamMgr.GetTeam(args.teamName)
 	if team == nil {
-		// 配置还没落盘（例如 Lead 刚建完团队就 spawn），退化成本地构造一份，
-		// 邮箱目录按同样的约定拼出来，投递仍然对得上。
+		// The config hasn't been persisted yet (e.g. the lead spawns right after
+		// creating the team); fall back to constructing a local copy. The mailbox
+		// directory follows the same naming convention, so delivery still lines up.
 		team = teams.NewTeam(args.teamName, teams.ModeInProcess)
 		teamMgr.CreateTeamWith(team)
 	}
@@ -156,8 +159,9 @@ func runTeammate(args teammateArgs) error {
 
 	member := team.AddMember(args.memberName, client, registry, provider.Protocol)
 
-	// Skill 工具的宿主由队友自己的 Agent 担任，所以要等 AddMember 建好 Agent
-	// 之后再接入。没有 ForkHost，声明 fork 模式的 skill 会退回 inline 执行。
+	// The teammate's own Agent acts as the host for the skill tools, so they can
+	// only be wired in after AddMember has built the Agent. With no ForkHost,
+	// skills declaring fork mode fall back to inline execution.
 	registry.Register(&skills.LoadSkillTool{Catalog: skillCatalog, Host: member.AgentRef})
 	registry.Register(&skills.InstallSkillTool{Catalog: skillCatalog})
 
@@ -171,7 +175,8 @@ func runTeammate(args teammateArgs) error {
 	return teams.RunInProcessTeammate(ctx, team, member, "", addendum, streamEventsToStderr())
 }
 
-// teammateToolOptions 汇总组装队友工具集需要的外部依赖。
+// teammateToolOptions gathers the external dependencies needed to assemble the
+// teammate tool set.
 type teammateToolOptions struct {
 	WorkDir    string
 	Protocol   string
@@ -182,15 +187,18 @@ type teammateToolOptions struct {
 	MCPServers []config.MCPServerConfig
 }
 
-// buildTeammateRegistry 组装队友工具集：文件与命令工具、工具检索、Worktree
-// 切换、MCP 扩展，再加上团队协作工具（按自己的名字发消息，以及读写团队共享
-// 任务板）。任务板按团队名解析到同一份 tasks.json，所以队友之间看到的是同一
-// 张表。
+// buildTeammateRegistry assembles the teammate tool set: file and command
+// tools, tool search, worktree switching, MCP extensions, plus the team
+// collaboration tools (sending messages under the teammate's own name, and
+// reading/writing the team-shared task board). The task board resolves to the
+// same tasks.json per team name, so all teammates see the same list.
 //
-// Agent 不在其中，调用树到队友这一层为止，队友不再往下派子 Agent。
-// TeamCreate 与 TeamDelete 也不在其中，组建和解散团队是 Lead 的职责。
+// Agent is deliberately absent: the call tree ends at the teammate level, and
+// teammates do not spawn sub-agents of their own. TeamCreate and TeamDelete
+// are absent as well — forming and disbanding teams is the lead's job.
 //
-// Skill 工具需要 Agent 实例充当宿主，由调用方在 Agent 建好之后单独接入。
+// The skill tools need an Agent instance as their host, so the caller wires
+// them in separately once the Agent has been built.
 func buildTeammateRegistry(ctx context.Context, opts teammateToolOptions) *tools.Registry {
 	registry := tools.CreateDefaultToolsWithWorkDir(opts.WorkDir).Registry
 

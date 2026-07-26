@@ -74,8 +74,10 @@ func TestParseTeammateFlagsIgnoresUnknown(t *testing.T) {
 	}
 }
 
-// 队友进程自己组装工具集，和进程内队员那份很容易各改各的，所以这里把清单钉死：
-// 协作工具必须在，团队管理和子 Agent 必须不在。
+// The teammate process assembles its own tool set, which can easily drift from
+// the in-process teammate's copy, so this test pins the roster down: the
+// collaboration tools must be present, and team management plus sub-agent
+// spawning must not be.
 func TestBuildTeammateRegistryToolSet(t *testing.T) {
 	reg := buildTeammateRegistry(context.Background(), teammateToolOptions{
 		WorkDir:    t.TempDir(),
@@ -86,7 +88,8 @@ func TestBuildTeammateRegistryToolSet(t *testing.T) {
 		MemberName: "ann",
 	})
 
-	// 干活的工具、通用能力，以及队友之间协作要用的消息和共享任务板
+	// Working tools, general capabilities, plus the messaging and shared task
+	// board tools teammates need to collaborate.
 	mustHave := []string{
 		"ReadFile", "WriteFile", "EditFile", "Bash", "Glob", "Grep",
 		"ToolSearch", "SyntheticOutput", "EnterWorktree", "ExitWorktree",
@@ -94,15 +97,16 @@ func TestBuildTeammateRegistryToolSet(t *testing.T) {
 	}
 	for _, name := range mustHave {
 		if reg.Get(name) == nil {
-			t.Errorf("队友工具集缺少 %s", name)
+			t.Errorf("teammate tool set is missing %s", name)
 		}
 	}
 
-	// 派人和建团队是 Lead 的职责，队友拿不到
+	// Spawning agents and creating teams are the lead's responsibilities;
+	// teammates must not get these tools.
 	mustNotHave := []string{"Agent", "TeamCreate", "TeamDelete"}
 	for _, name := range mustNotHave {
 		if reg.Get(name) != nil {
-			t.Errorf("队友工具集不应包含 %s", name)
+			t.Errorf("teammate tool set should not include %s", name)
 		}
 	}
 }

@@ -83,7 +83,7 @@ func TestDeriveSubAgentCheckerOverrideMode(t *testing.T) {
 }
 
 func TestRunForkRejectedWhenQuerySourceIsFork(t *testing.T) {
-	// 嵌套 fork 的首道防线：直接看 QuerySource 标记。
+	// Primary nested-fork guard: check the QuerySource marker directly.
 	tool := &AgentTool{
 		Registry:     tools.NewRegistry(),
 		Conversation: conversation.NewManager(),
@@ -100,7 +100,8 @@ func TestRunForkRejectedWhenQuerySourceIsFork(t *testing.T) {
 }
 
 func TestRunForkRejectedWhenBoilerplateInHistory(t *testing.T) {
-	// 嵌套 fork 的兜底防线：QuerySource 没传到时，扫对话历史里的 fork 样板标记。
+	// Fallback nested-fork guard: when QuerySource didn't propagate, scan the
+	// conversation history for the fork boilerplate marker.
 	conv := conversation.NewManager()
 	conv.AddUserMessage(ForkBoilerplateTag + " stale message from a prior fork")
 	tool := &AgentTool{
@@ -115,8 +116,9 @@ func TestRunForkRejectedWhenBoilerplateInHistory(t *testing.T) {
 }
 
 func TestCloneRegistryForForkSetsQuerySource(t *testing.T) {
-	// fork 必须原样继承父工具池，只把其中的 Agent 工具换成带 QuerySource=ForkQuerySource
-	// 的拷贝，这样再往下 fork 会在调用那一刻被拦住。
+	// A fork must inherit the parent tool pool verbatim, replacing only the Agent
+	// tool with a copy carrying QuerySource=ForkQuerySource, so a further fork
+	// attempt is intercepted at call time.
 	reg := tools.NewRegistry()
 	reg.Register(&AgentTool{}) // simulate parent's Agent tool
 	reg.Register(&dummyTool{name: "Bash", category: tools.CategoryCommand})
@@ -135,7 +137,8 @@ func TestCloneRegistryForForkSetsQuerySource(t *testing.T) {
 }
 
 func TestExecuteRoutesBackgroundSpecToAsync(t *testing.T) {
-	// Agent 定义里标了 background 就必须走异步，调用方没传 run_in_background 也一样。
+	// An agent definition marked background must be routed to async dispatch,
+	// even when the caller does not pass run_in_background.
 	tool := &AgentTool{
 		Registry: tools.NewRegistry(),
 		TaskMgr:  NewTaskManager(),

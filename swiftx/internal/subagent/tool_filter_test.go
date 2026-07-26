@@ -202,8 +202,10 @@ func TestGeneralPurposeNoRecursion(t *testing.T) {
 	}
 }
 
-// 进程内队友的工具集从 Lead 那份过滤而来，禁用名单要在 spec 自带的基础上再并上
-// TeammateDisallowedTools，否则队友会连团队成员管理一起继承过去。
+// An in-process teammate's tool set is filtered down from the lead's copy; the
+// disallow list must be the spec's own list merged with
+// TeammateDisallowedTools, otherwise teammates would inherit team membership
+// management along with everything else.
 func TestTeammateFilterBlocksTeamManagement(t *testing.T) {
 	reg := makeRegistry("ReadFile", "Bash", "EditFile", "Agent", "TeamCreate", "TeamDelete", "SendMessage")
 	spec := BuiltinSpecs["general-purpose"]
@@ -213,12 +215,12 @@ func TestTeammateFilterBlocksTeamManagement(t *testing.T) {
 
 	for _, name := range []string{"Agent", "TeamCreate", "TeamDelete"} {
 		if hasToolNamed(filtered, name) {
-			t.Errorf("队友工具集不应包含 %s", name)
+			t.Errorf("teammate tool set should not include %s", name)
 		}
 	}
 	for _, name := range []string{"ReadFile", "Bash", "EditFile"} {
 		if !hasToolNamed(filtered, name) {
-			t.Errorf("队友工具集缺少 %s", name)
+			t.Errorf("teammate tool set is missing %s", name)
 		}
 	}
 }

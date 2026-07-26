@@ -106,8 +106,9 @@ type AgentDefinition struct {
 	Filename string `yaml:"-"`
 }
 
-// validPermissionModes 是 Agent 定义里 permission_mode 字段的合法取值，空串表示不覆盖、
-// 沿用父 Agent 的模式。
+// validPermissionModes lists the legal values for the permission_mode field in
+// an agent definition; the empty string means "no override" — inherit the
+// parent agent's mode.
 var validPermissionModes = map[string]bool{
 	"":                  true,
 	"acceptEdits":       true,
