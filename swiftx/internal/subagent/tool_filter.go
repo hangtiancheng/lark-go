@@ -26,10 +26,10 @@ import (
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/tools"
 )
 
-// AllAgentDisallowedTools Every sub-agent (built-in or custom) is blocked from using these tools,
-// regardless of definition allowlist. Names that don't correspond to any locally-registered tool
-// (TaskOutput, ExitPlanMode, EnterPlanMode, Workflow) are kept as placeholders so the constant
-// matches upstream semantics — filterToolsForAgent skips unknown names harmlessly.
+// AllAgentDisallowedTools 是任何子 Agent 都拿不到的工具，Agent 定义里的白名单也开不了它们。
+// 其中 TaskOutput、ExitPlanMode、EnterPlanMode、Workflow 在当前工具集里并没有对应实现，
+// 留着是为了把「子 Agent 不该有哪些能力」这份清单写全，过滤时遇到不认识的名字直接跳过，
+// 将来补上同名工具就自动生效。
 var AllAgentDisallowedTools = map[string]bool{
 	"TaskOutput":      true,
 	"ExitPlanMode":    true,
@@ -87,6 +87,10 @@ var InProcessTeammateAllowedTools = map[string]bool{
 	"CronDelete":  true,
 	"CronList":    true,
 }
+
+// TeammateDisallowedTools 队友在协作工具之外额外被挡掉的工具。组建和解散团队
+// 由 Lead 负责，队友只管干活和相互协调，不参与团队成员管理。
+var TeammateDisallowedTools = []string{"TeamCreate", "TeamDelete"}
 
 func IsMCPTool(name string) bool {
 	return strings.HasPrefix(name, "mcp__")

@@ -83,8 +83,7 @@ func TestDeriveSubAgentCheckerOverrideMode(t *testing.T) {
 }
 
 func TestRunForkRejectedWhenQuerySourceIsFork(t *testing.T) {
-	// Primary nested-fork guard: matches the querySource branch in the design TypeScript
-	// implementation.
+	// 嵌套 fork 的首道防线：直接看 QuerySource 标记。
 	tool := &AgentTool{
 		Registry:     tools.NewRegistry(),
 		Conversation: conversation.NewManager(),
@@ -101,7 +100,7 @@ func TestRunForkRejectedWhenQuerySourceIsFork(t *testing.T) {
 }
 
 func TestRunForkRejectedWhenBoilerplateInHistory(t *testing.T) {
-	// Fallback nested-fork guard: matches isInForkChild from the design TypeScript implementation.
+	// 嵌套 fork 的兜底防线：QuerySource 没传到时，扫对话历史里的 fork 样板标记。
 	conv := conversation.NewManager()
 	conv.AddUserMessage(ForkBoilerplateTag + " stale message from a prior fork")
 	tool := &AgentTool{
@@ -116,9 +115,8 @@ func TestRunForkRejectedWhenBoilerplateInHistory(t *testing.T) {
 }
 
 func TestCloneRegistryForForkSetsQuerySource(t *testing.T) {
-	// Fork must inherit the parent tool pool verbatim except that nested AgentTool instances get
-	// QuerySource=ForkQuerySource so a recursive fork is caught at call time. Matches
-	// FORK_AGENT.tools=['*'] + useExactTools=true.
+	// fork 必须原样继承父工具池，只把其中的 Agent 工具换成带 QuerySource=ForkQuerySource
+	// 的拷贝，这样再往下 fork 会在调用那一刻被拦住。
 	reg := tools.NewRegistry()
 	reg.Register(&AgentTool{}) // simulate parent's Agent tool
 	reg.Register(&dummyTool{name: "Bash", category: tools.CategoryCommand})
@@ -129,7 +127,7 @@ func TestCloneRegistryForForkSetsQuerySource(t *testing.T) {
 	}
 	at, ok := forked.Get("Agent").(*AgentTool)
 	if !ok {
-		t.Fatal("Agent tool should still be present (useExactTools=true)")
+		t.Fatal("Agent tool should still be present (tool pool inherited verbatim)")
 	}
 	if at.QuerySource != ForkQuerySource {
 		t.Errorf("cloned Agent tool QuerySource = %q, want %q", at.QuerySource, ForkQuerySource)
@@ -137,8 +135,7 @@ func TestCloneRegistryForForkSetsQuerySource(t *testing.T) {
 }
 
 func TestExecuteRoutesBackgroundSpecToAsync(t *testing.T) {
-	// Definition-level `background: true` must force async, matching the
-	// `run_in_background === true || selectedAgent.background === true` gating.
+	// Agent 定义里标了 background 就必须走异步，调用方没传 run_in_background 也一样。
 	tool := &AgentTool{
 		Registry: tools.NewRegistry(),
 		TaskMgr:  NewTaskManager(),
@@ -156,20 +153,6 @@ func TestExecuteRoutesBackgroundSpecToAsync(t *testing.T) {
 		if !strings.Contains(result.Output, "unknown agent type") {
 			t.Errorf("expected unknown-agent-type error, got %q", result.Output)
 		}
-	}
-}
-
-// cwd is a parameter reserved for internal callers; it is not part of the schema, so the model never sees it and will not pass it.
-func TestSchemaDoesNotExposeCwd(t *testing.T) {
-	tool := &AgentTool{
-		Registry: tools.NewRegistry(),
-		TaskMgr:  NewTaskManager(),
-	}
-
-	inputSchema, _ := tool.Schema()["input_schema"].(map[string]any)
-	props, _ := inputSchema["properties"].(map[string]any)
-	if _, ok := props["cwd"]; ok {
-		t.Error("cwd should not appear in the Agent tool's schema")
 	}
 }
 

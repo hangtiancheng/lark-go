@@ -69,15 +69,15 @@ type SubAgentProgress struct {
 
 const ForkBoilerplateTag = "<fork_boilerplate>"
 
-// ForkAgentType matches FORK_AGENT.agentType from the design TypeScript implementation.
+// ForkAgentType 是 fork 子 Agent 的类型名，拼进 QuerySource 用来识别 fork 出来的会话。
 const ForkAgentType = "fork"
 
-// GeneralPurposeAgentType is the fallback target when subagent_type is omitted while fork is disabled.
+// GeneralPurposeAgentType 是 fork 关闭时，省略 subagent_type 的回退目标。
 const GeneralPurposeAgentType = "general-purpose"
 
-// ForkQuerySource matches the value produced by getQuerySourceForAgent for fork children
-// (`agent:builtin:${FORK_AGENT.agentType}`). Used as the primary fork-nesting signal; falls back to
-// scanning conversation history for ForkBoilerplateTag.
+// ForkQuerySource 是 fork 子 Agent 的来源标记，形如 `agent:builtin:fork`。
+// 它是判断「当前身处 fork 子 Agent」的首选信号，拿不到时再退回扫描对话历史里的
+// ForkBoilerplateTag。
 const ForkQuerySource = "agent:builtin:" + ForkAgentType
 
 type AgentTool struct {
@@ -102,10 +102,9 @@ type AgentTool struct {
 	// summarized out of conversation history.
 	QuerySource string
 
-	// ForkDisabled, when true, makes an omitted subagent_type fall back to the
-	// general-purpose agent instead of forking. The "disabled" rather than "enabled"
-	// semantics are used so that the zero value is the default behavior (fork available),
-	// sparing every construction site from having to set it explicitly.
+	// ForkDisabled 为真时，省略 subagent_type 不再 fork，而是回退到通用 agent。
+	// 用「关闭」而不是「开启」语义，是为了让零值就是默认行为（fork 可用），
+	// 每个构造点不必都显式赋值。
 	ForkDisabled bool
 }
 
@@ -113,25 +112,24 @@ func (t *AgentTool) Name() string                 { return "Agent" }
 func (t *AgentTool) Category() tools.ToolCategory { return tools.CategoryCommand }
 
 func (t *AgentTool) Description() string {
-	var desc strings.Builder
-	desc.WriteString(`Launch a sub-agent to handle a complex task. Each sub-agent runs independently with its own context. The sub-agent cannot see the current conversation.
+	desc := `Launch a sub-agent to handle a complex task. Each sub-agent runs independently with its own context. The sub-agent cannot see the current conversation.
 
 This is ONE tool with multiple roles. Roles are NOT separate tools — you pick one by passing its name in the "subagent_type" parameter. Do not search for a tool named after a role; call THIS tool ("Agent") and set "subagent_type".
 
-Available roles for the "subagent_type" parameter:`)
+Available roles for the "subagent_type" parameter:`
 
 	if t.Loader != nil {
 		for _, name := range t.Loader.ListNames() {
 			def := t.Loader.Get(name)
-			desc.WriteString("\n- " + name + ": " + def.WhenToUse)
+			desc += "\n- " + name + ": " + def.WhenToUse
 		}
 	} else {
-		desc.WriteString("\n- general-purpose: Full tool access for multi-step tasks (default)")
-		desc.WriteString("\n- plan: Read-only tools for designing implementation plans")
-		desc.WriteString("\n- explore: Read-only search agent for locating code")
+		desc += "\n- general-purpose: Full tool access for multi-step tasks (default)"
+		desc += "\n- plan: Read-only tools for designing implementation plans"
+		desc += "\n- explore: Read-only search agent for locating code"
 	}
 
-	desc.WriteString(`
+	desc += `
 
 Example call shape:
 {
@@ -144,8 +142,8 @@ Example call shape:
 }
 
 Write a detailed prompt explaining what the sub-agent should do and why — it has no prior context.
-When tasks are independent, launch multiple sub-agents in parallel by making multiple Agent tool calls in a single response.`)
-	return desc.String()
+When tasks are independent, launch multiple sub-agents in parallel by making multiple Agent tool calls in a single response.`
+	return desc
 }
 
 func (t *AgentTool) Schema() map[string]any {
@@ -239,10 +237,6 @@ func (t *AgentTool) Execute(ctx context.Context, args map[string]any) tools.Tool
 	agentName, _ := args["name"].(string)
 	teamName, _ := args["team_name"].(string)
 	modeOverride, _ := args["mode"].(string)
-	// cwd is not part of the schema; it is only for internal callers to specify the
-	// sub-agent's working directory. When given together with isolation: "worktree",
-	// the worktree takes precedence.
-	cwdOverride, _ := args["cwd"].(string)
 	isolation, _ := args["isolation"].(string)
 	planModeRequired, _ := args["plan_mode_required"].(bool)
 
@@ -260,11 +254,9 @@ func (t *AgentTool) Execute(ctx context.Context, args map[string]any) tools.Tool
 		return t.runAsTeammate(ctx, teamName, agentName, description, prompt, modelOverride, subagentType, isolation, planModeRequired)
 	}
 
-	// When subagent_type is omitted, the path taken is decided by configuration: with fork
-	// enabled it inherits the parent conversation; with fork disabled it is treated as an
-	// unspecified type and falls back to the general-purpose agent. No error is raised here —
-	// the model merely left out an optional parameter, and aborting the call over that is not
-	// worth it; the general-purpose agent can get the job done just as well.
+	// 省略 subagent_type 时的走向由配置决定：fork 开着就继承父对话，关着就当成
+	// 没指定类型，回退到通用 agent。这里不报错，模型只是没填一个可选参数，
+	// 为此中断一次调用不值得，回退到通用 agent 一样能把活干了。
 	if subagentType == "" && t.ForkDisabled {
 		subagentType = GeneralPurposeAgentType
 	}
@@ -301,15 +293,15 @@ func (t *AgentTool) Execute(ctx context.Context, args map[string]any) tools.Tool
 		spec.PermissionMode = modeOverride
 	}
 
-	// Definition-level `background: true` forces the spawn to run async, matching the
-	// `run_in_background || selectedAgent.background` gating.
+	// 调用方传 run_in_background，或者 Agent 定义自己标了 background，都走异步派发。
+	// 两个条件是或的关系：定义里声明的后台属性不该被调用方漏传而失效。
 	if runInBackground || spec.Background {
 		return t.runAsync(ctx, spec, description, prompt, modelOverride)
 	}
-	return t.runSync(ctx, spec, description, prompt, modelOverride, isolation, cwdOverride)
+	return t.runSync(ctx, spec, description, prompt, modelOverride, isolation)
 }
 
-func (t *AgentTool) runSync(ctx context.Context, spec SubAgentSpec, description, prompt, modelOverride, isolation, cwdOverride string) tools.ToolResult {
+func (t *AgentTool) runSync(ctx context.Context, spec SubAgentSpec, description, prompt, modelOverride, isolation string) tools.ToolResult {
 	subRegistry := FilterToolsForAgent(t.Registry, spec.Tools, spec.DisallowedTools, false)
 	client := t.selectClient(spec.Model, modelOverride)
 
@@ -339,8 +331,6 @@ func (t *AgentTool) runSync(ctx context.Context, spec SubAgentSpec, description,
 		parentCwd, _ := os.Getwd()
 		notice := worktree.BuildWorktreeNotice(parentCwd, wtResult.WorktreePath)
 		prompt = notice + "\n\n" + prompt
-	} else if cwdOverride != "" {
-		subAgent.WorkDir = cwdOverride
 	}
 
 	conv := conversation.NewManager()
@@ -453,10 +443,9 @@ func (t *AgentTool) runFork(ctx context.Context, description, prompt, modelOverr
 	forkedConv := buildForkedConversation(t.Conversation, prompt)
 
 	client := t.selectClient("", modelOverride)
-	// Fork inherits the parent's exact tool pool to keep API request prefixes byte-identical for
-	// prompt cache hits (matches FORK_AGENT.tools=['*'] + useExactTools=true). The Agent tool gets
-	// cloned with QuerySource=ForkQuerySource so any nested fork attempt is rejected by the primary
-	// check in runFork.
+	// fork 原样继承父 Agent 的工具池，这样发出去的请求前缀和父 Agent 逐字节一致，
+	// prompt 缓存才命中得上。其中的 Agent 工具被换成一份 QuerySource=ForkQuerySource
+	// 的浅拷贝，于是再往下 fork 会在 runFork 的首道检查那里被拒。
 	subRegistry := cloneRegistryForFork(t.Registry)
 
 	subAgent := agent.New(client, subRegistry, t.Protocol)
@@ -473,12 +462,12 @@ func (t *AgentTool) runFork(ctx context.Context, description, prompt, modelOverr
 	t.TaskMgr.SetRunning(taskID, cancel)
 
 	go func() {
-		var output strings.Builder
+		var output string
 		ch := subAgent.Run(forkCtx, forkedConv)
 		for ev := range ch {
 			switch e := ev.(type) {
 			case agent.StreamText:
-				output.WriteString(e.Text)
+				output += e.Text
 			case agent.PermissionRequestEvent:
 				// Headless: auto-deny so the fork doesn't stall on respCh.
 				e.ResponseCh <- agent.PermDeny
@@ -487,7 +476,7 @@ func (t *AgentTool) runFork(ctx context.Context, description, prompt, modelOverr
 				return
 			}
 		}
-		t.TaskMgr.SetCompleted(taskID, output.String())
+		t.TaskMgr.SetCompleted(taskID, output)
 	}()
 
 	return tools.ToolResult{
@@ -533,9 +522,8 @@ func deriveSubAgentChecker(parent *permissions.Checker, modeOverride string) *pe
 
 // cloneRegistryForFork returns a registry that copies the parent verbatim except that any
 // *AgentTool instance is replaced with a shallow copy whose QuerySource is set to ForkQuerySource.
-// This is the local equivalent of useExactTools=true plus getQuerySourceForAgent: the fork child
-// sees the same wire-level tool definitions as its parent (so prompt cache hits) but a nested fork
-// attempt is caught at call time by the QuerySource check in runFork.
+// 这样 fork 子 Agent 看到的工具定义和父 Agent 在协议层完全一样（prompt 缓存因此命中），
+// 但它再想 fork 时会在调用那一刻被 runFork 里的 QuerySource 检查拦下。
 func cloneRegistryForFork(reg *tools.Registry) *tools.Registry {
 	forked := tools.NewRegistry()
 	for _, tool := range reg.ListTools() {
@@ -623,9 +611,8 @@ func (t *AgentTool) runAsTeammate(
 	teamName, memberName, description, prompt, modelOverride, subagentType, isolation string,
 	planModeRequired bool,
 ) tools.ToolResult {
-	// If the team doesn't exist, create it on the fly: in coordinator mode TeamCreate is not
-	// on the whitelist, so requiring the Lead to create the team before dispatching members
-	// would leave it stuck at the first step.
+	// 团队不存在就顺手建一个：coordinator 模式下 TeamCreate 不在白名单里，
+	// 要求 Lead 先建团队再派人，它会卡在第一步。
 	team := t.TeamMgr.GetTeam(teamName)
 	if team == nil {
 		team = t.TeamMgr.CreateTeamFull(teamName, teams.DetectBackend(), teams.LeadName, description)
@@ -654,10 +641,10 @@ func (t *AgentTool) runAsTeammate(
 		}
 	}
 
-	subRegistry := FilterToolsForAgent(t.Registry, spec.Tools, spec.DisallowedTools, false)
-	// Teammate collaboration tools: send messages under the teammate's own name, and inject
-	// the team-shared task board tools (overriding the inherited personal same-named tools so
-	// that teammates share a single task list).
+	teammateDisallowed := append(append([]string{}, spec.DisallowedTools...), TeammateDisallowedTools...)
+	subRegistry := FilterToolsForAgent(t.Registry, spec.Tools, teammateDisallowed, false)
+	// 队友协作工具：以队友自己的名字发消息，并注入团队共享任务板工具
+	// （覆盖继承来的个人版同名工具，让队友之间共享同一份任务列表）。
 	subRegistry.Register(&teams.SendMessageTool{TeamMgr: t.TeamMgr, SenderName: memberName})
 	subRegistry.Register(&teams.TaskCreateTool{TeamMgr: t.TeamMgr, TeamName: teamName, AgentName: memberName})
 	subRegistry.Register(&teams.TaskGetTool{TeamMgr: t.TeamMgr, TeamName: teamName})
@@ -689,9 +676,8 @@ func (t *AgentTool) runAsTeammate(
 
 	team.SetMemberMeta(memberName, subagentType, modelOverride, workdir)
 
-	// A teammate marked plan_mode_required starts in plan mode: it can only read, not modify.
-	// It writes out a plan for the Lead to approve, and only switches back to normal
-	// permissions after approval.
+	// 标了 plan_mode_required 的队友以计划模式启动：只能读不能改，
+	// 写出计划交 Lead 审批，通过后才切回正常权限。
 	teammateChecker := t.ParentChecker
 	if planModeRequired && t.ParentChecker != nil {
 		teammateChecker = permissions.NewChecker(

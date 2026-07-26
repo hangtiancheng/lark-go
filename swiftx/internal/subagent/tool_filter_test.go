@@ -201,3 +201,24 @@ func TestGeneralPurposeNoRecursion(t *testing.T) {
 		t.Error("EditFile should remain for general-purpose (sync)")
 	}
 }
+
+// 进程内队友的工具集从 Lead 那份过滤而来，禁用名单要在 spec 自带的基础上再并上
+// TeammateDisallowedTools，否则队友会连团队成员管理一起继承过去。
+func TestTeammateFilterBlocksTeamManagement(t *testing.T) {
+	reg := makeRegistry("ReadFile", "Bash", "EditFile", "Agent", "TeamCreate", "TeamDelete", "SendMessage")
+	spec := BuiltinSpecs["general-purpose"]
+
+	disallowed := append(append([]string{}, spec.DisallowedTools...), TeammateDisallowedTools...)
+	filtered := FilterToolsForAgent(reg, spec.Tools, disallowed, false)
+
+	for _, name := range []string{"Agent", "TeamCreate", "TeamDelete"} {
+		if hasToolNamed(filtered, name) {
+			t.Errorf("队友工具集不应包含 %s", name)
+		}
+	}
+	for _, name := range []string{"ReadFile", "Bash", "EditFile"} {
+		if !hasToolNamed(filtered, name) {
+			t.Errorf("队友工具集缺少 %s", name)
+		}
+	}
+}

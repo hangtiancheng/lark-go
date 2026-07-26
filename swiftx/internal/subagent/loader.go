@@ -51,8 +51,8 @@ func NewAgentLoader(workDir string) *AgentLoader {
 	}
 }
 
-// getBuiltinSpecs Verification is feature-gated upstream (`feature('VERIFICATION_AGENT') && `);
-// locally that's a SWIFTX_VERIFICATION_AGENT env var.
+// getBuiltinSpecs 返回内建的 Agent 定义。验证型 Agent 默认不开，由
+// SWIFTX_VERIFICATION_AGENT 环境变量控制，需要时才加进来。
 func getBuiltinSpecs() map[string]SubAgentSpec {
 	result := make(map[string]SubAgentSpec, len(BuiltinSpecs)+1)
 	maps.Copy(result, BuiltinSpecs)

@@ -20,7 +20,11 @@
 
 package main
 
-import "testing"
+import (
+	"context"
+	"github.com/hangtiancheng/swifty.go/swiftx/internal/teams"
+	"testing"
+)
 
 func TestParseTeammateFlagsAbsent(t *testing.T) {
 	cases := [][]string{
@@ -67,5 +71,38 @@ func TestParseTeammateFlagsIgnoresUnknown(t *testing.T) {
 	}
 	if got.teamName != "t" || got.memberName != "m" {
 		t.Errorf("parsed = %+v", got)
+	}
+}
+
+// 队友进程自己组装工具集，和进程内队员那份很容易各改各的，所以这里把清单钉死：
+// 协作工具必须在，团队管理和子 Agent 必须不在。
+func TestBuildTeammateRegistryToolSet(t *testing.T) {
+	reg := buildTeammateRegistry(context.Background(), teammateToolOptions{
+		WorkDir:    t.TempDir(),
+		Protocol:   "anthropic",
+		SessionID:  "sess-1",
+		TeamMgr:    teams.NewTeamManager(),
+		TeamName:   "alpha",
+		MemberName: "ann",
+	})
+
+	// 干活的工具、通用能力，以及队友之间协作要用的消息和共享任务板
+	mustHave := []string{
+		"ReadFile", "WriteFile", "EditFile", "Bash", "Glob", "Grep",
+		"ToolSearch", "SyntheticOutput", "EnterWorktree", "ExitWorktree",
+		"SendMessage", "TaskCreate", "TaskGet", "TaskList", "TaskUpdate",
+	}
+	for _, name := range mustHave {
+		if reg.Get(name) == nil {
+			t.Errorf("队友工具集缺少 %s", name)
+		}
+	}
+
+	// 派人和建团队是 Lead 的职责，队友拿不到
+	mustNotHave := []string{"Agent", "TeamCreate", "TeamDelete"}
+	for _, name := range mustNotHave {
+		if reg.Get(name) != nil {
+			t.Errorf("队友工具集不应包含 %s", name)
+		}
 	}
 }

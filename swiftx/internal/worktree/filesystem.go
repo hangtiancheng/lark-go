@@ -18,8 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// Package worktree filesystem helpers: read git state without spawning git subprocesses. from the
-// design TypeScript implementation.
+// Package worktree filesystem helpers: read git state without spawning git subprocesses.
 //
 // Covers: resolving .git directories (including worktrees/submodules), parsing HEAD, resolving refs
 // via loose files and packed-refs.

@@ -32,8 +32,13 @@ import (
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/config"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/conversation"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/llm"
+	"github.com/hangtiancheng/swifty.go/swiftx/internal/mcp"
+	"github.com/hangtiancheng/swifty.go/swiftx/internal/prompt"
+	"github.com/hangtiancheng/swifty.go/swiftx/internal/session"
+	"github.com/hangtiancheng/swifty.go/swiftx/internal/skills"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/teams"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/tools"
+	"github.com/hangtiancheng/swifty.go/swiftx/internal/worktree"
 )
 
 // teammateArgs holds the values parsed off the CLI when this process is
@@ -53,7 +58,7 @@ type teammateArgs struct {
 //	swiftx --teammate --team-name <t> --agent-name <n>
 //
 // The parsing is intentionally minimal: only the three flags this
-// worker needs are recognised, and they must come as separate tokens.
+// worker needs are recognized, and they must come as separate tokens.
 func parseTeammateFlags(args []string) (teammateArgs, bool) {
 	var out teammateArgs
 	if len(args) == 0 || args[0] != "--teammate" {
@@ -99,31 +104,8 @@ func runTeammate(args teammateArgs) error {
 	}
 	provider := cfg.Providers[0]
 
-	client, err := llm.NewClient(&provider, "")
-	if err != nil {
-		return fmt.Errorf("create LLM client: %w", err)
-	}
-
-	registry := tools.NewRegistry()
-	for _, t := range builtinTeammateTools() {
-		registry.Register(t)
-	}
-
-	// The teammate process loads the team directly from config.json on disk so it
-	// sees the same member list as the lead. The team directory lives under the
-	// user's home directory and is unaffected by worktree directory changes.
-	teamMgr := teams.NewTeamManager()
-	team := teamMgr.GetTeam(args.teamName)
-	if team == nil {
-		// Config hasn't been persisted yet (e.g., lead spawns immediately after
-		// creating the team); fall back to constructing a local copy. The mailbox
-		// directory follows the same convention so delivery still matches.
-		team = teams.NewTeam(args.teamName, teams.ModeInProcess)
-		teamMgr.CreateTeamWith(team)
-	}
-	registry.Register(&teams.SendMessageTool{TeamMgr: teamMgr, SenderName: args.memberName})
-
-	member := team.AddMember(args.memberName, client, registry, provider.Protocol)
+	wd, _ := os.Getwd()
+	sessionID := session.NewID()
 
 	// Worker processes get SIGINT/SIGTERM forwarded so closing the
 	// pane / Ctrl-C in the tab cleanly cancels the loop and lets
@@ -137,6 +119,48 @@ func runTeammate(args teammateArgs) error {
 		cancel()
 	}()
 
+	// Skill 目录既要进系统提示词让模型知道有哪些技能可用，也要挂到 LoadSkill
+	// 工具上供模型按名字加载。
+	skillCatalog := skills.LoadCatalog(wd)
+	env := prompt.DetectEnvironment(wd)
+	env.Model = provider.Model
+	systemPrompt := prompt.BuildSystemPrompt(env, prompt.BuildOptions{
+		SkillSection: buildPrintSkillSection(skillCatalog),
+	})
+
+	client, err := llm.NewClient(&provider, systemPrompt)
+	if err != nil {
+		return fmt.Errorf("create LLM client: %w", err)
+	}
+
+	// 队员进程直接从磁盘上的 config.json 把团队捞回来，这样它看到的队友名单
+	// 和 Lead 那边是同一份。团队目录在用户主目录下，不受 worktree 换工作目录影响。
+	teamMgr := teams.NewTeamManager()
+	team := teamMgr.GetTeam(args.teamName)
+	if team == nil {
+		// 配置还没落盘（例如 Lead 刚建完团队就 spawn），退化成本地构造一份，
+		// 邮箱目录按同样的约定拼出来，投递仍然对得上。
+		team = teams.NewTeam(args.teamName, teams.ModeInProcess)
+		teamMgr.CreateTeamWith(team)
+	}
+
+	registry := buildTeammateRegistry(ctx, teammateToolOptions{
+		WorkDir:    wd,
+		Protocol:   provider.Protocol,
+		SessionID:  sessionID,
+		TeamMgr:    teamMgr,
+		TeamName:   args.teamName,
+		MemberName: args.memberName,
+		MCPServers: cfg.MCPServers,
+	})
+
+	member := team.AddMember(args.memberName, client, registry, provider.Protocol)
+
+	// Skill 工具的宿主由队友自己的 Agent 担任，所以要等 AddMember 建好 Agent
+	// 之后再接入。没有 ForkHost，声明 fork 模式的 skill 会退回 inline 执行。
+	registry.Register(&skills.LoadSkillTool{Catalog: skillCatalog, Host: member.AgentRef})
+	registry.Register(&skills.InstallSkillTool{Catalog: skillCatalog})
+
 	addendum := teams.BuildTeammateAddendum(args.teamName, args.memberName, nil)
 
 	// No initial prompt argument: the lead wrote the first message to
@@ -147,18 +171,61 @@ func runTeammate(args teammateArgs) error {
 	return teams.RunInProcessTeammate(ctx, team, member, "", addendum, streamEventsToStderr())
 }
 
-// builtinTeammateTools is the worker-side tool whitelist. Teammates
-// have file/code access but cannot create or delete teams (only the
-// lead coordinates team membership).
-func builtinTeammateTools() []tools.Tool {
-	return []tools.Tool{
-		&tools.ReadFileTool{},
-		&tools.WriteFileTool{},
-		&tools.EditFileTool{},
-		&tools.BashTool{},
-		&tools.GlobTool{},
-		&tools.GrepTool{},
+// teammateToolOptions 汇总组装队友工具集需要的外部依赖。
+type teammateToolOptions struct {
+	WorkDir    string
+	Protocol   string
+	SessionID  string
+	TeamMgr    *teams.TeamManager
+	TeamName   string
+	MemberName string
+	MCPServers []config.MCPServerConfig
+}
+
+// buildTeammateRegistry 组装队友工具集：文件与命令工具、工具检索、Worktree
+// 切换、MCP 扩展，再加上团队协作工具（按自己的名字发消息，以及读写团队共享
+// 任务板）。任务板按团队名解析到同一份 tasks.json，所以队友之间看到的是同一
+// 张表。
+//
+// Agent 不在其中，调用树到队友这一层为止，队友不再往下派子 Agent。
+// TeamCreate 与 TeamDelete 也不在其中，组建和解散团队是 Lead 的职责。
+//
+// Skill 工具需要 Agent 实例充当宿主，由调用方在 Agent 建好之后单独接入。
+func buildTeammateRegistry(ctx context.Context, opts teammateToolOptions) *tools.Registry {
+	registry := tools.CreateDefaultToolsWithWorkDir(opts.WorkDir).Registry
+
+	registry.Register(&tools.ToolSearchTool{Registry: registry, Protocol: opts.Protocol})
+	registry.Register(&tools.SyntheticOutputTool{})
+
+	gitRoot := worktree.FindCanonicalGitRoot(opts.WorkDir)
+	registry.Register(&tools.EnterWorktreeTool{SessionID: opts.SessionID, RepoRoot: gitRoot})
+	registry.Register(&tools.ExitWorktreeTool{RepoRoot: gitRoot})
+
+	registry.Register(&teams.SendMessageTool{TeamMgr: opts.TeamMgr, SenderName: opts.MemberName})
+	registry.Register(&teams.TaskCreateTool{TeamMgr: opts.TeamMgr, TeamName: opts.TeamName, AgentName: opts.MemberName})
+	registry.Register(&teams.TaskGetTool{TeamMgr: opts.TeamMgr, TeamName: opts.TeamName})
+	registry.Register(&teams.TaskListTool{TeamMgr: opts.TeamMgr, TeamName: opts.TeamName})
+	registry.Register(&teams.TaskUpdateTool{TeamMgr: opts.TeamMgr, TeamName: opts.TeamName})
+
+	if len(opts.MCPServers) > 0 {
+		mgr := mcp.NewManager()
+		serverConfigs := make([]mcp.ServerConfig, 0, len(opts.MCPServers))
+		for _, c := range opts.MCPServers {
+			serverConfigs = append(serverConfigs, mcp.ServerConfig{
+				Name:      c.Name,
+				Command:   c.Command,
+				Args:      c.Args,
+				URL:       c.URL,
+				Transport: c.Transport,
+				Headers:   c.Headers,
+				Env:       c.Env,
+			})
+		}
+		mgr.LoadConfigs(serverConfigs)
+		mgr.RegisterAllTools(ctx, registry)
 	}
+
+	return registry
 }
 
 // streamEventsToStderr returns a channel that forwards every agent

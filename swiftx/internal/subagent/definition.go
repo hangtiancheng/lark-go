@@ -106,7 +106,8 @@ type AgentDefinition struct {
 	Filename string `yaml:"-"`
 }
 
-// validPermissionModes matches PERMISSION_MODES from the design TypeScript implementation.
+// validPermissionModes 是 Agent 定义里 permission_mode 字段的合法取值，空串表示不覆盖、
+// 沿用父 Agent 的模式。
 var validPermissionModes = map[string]bool{
 	"":                  true,
 	"acceptEdits":       true,
