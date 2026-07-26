@@ -97,7 +97,7 @@ func (ctx *Context) Query(key string) string {
 }
 
 func (ctx *Context) Param(key string) string {
-	value, _ := ctx.Params[key]
+	value := ctx.Params[key]
 	return value
 }
 

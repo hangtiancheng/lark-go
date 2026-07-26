@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"strconv"
 	"strings"
@@ -119,9 +120,7 @@ func (a *Agent) ClearActiveSkills() {
 // /skills to surface what's active.
 func (a *Agent) GetActiveSkills() map[string]string {
 	out := make(map[string]string, len(a.activeSkills))
-	for k, v := range a.activeSkills {
-		out[k] = v
-	}
+	maps.Copy(out, a.activeSkills)
 	return out
 }
 
@@ -249,7 +248,7 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 
 			events, errs := a.Client.Stream(ctx, conv, toolSchemas)
 
-			var text string
+			var text strings.Builder
 			var toolCalls []llm.ToolCallComplete
 			var thinkingBlocks []conversation.ThinkingBlock
 			var stopReason string
@@ -267,7 +266,7 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 						Signature: e.Signature,
 					})
 				case llm.TextDelta:
-					text += e.Text
+					text.WriteString(e.Text)
 					ch <- StreamText{Text: e.Text}
 				case llm.ToolCallStart:
 					ch <- ToolUseEvent{ToolID: e.ToolID, ToolName: e.ToolName}
@@ -291,7 +290,7 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 					usage = e.Usage
 				}
 			}
-			a.emitHook(hooks.EventPostReceive, text, nil)
+			a.emitHook(hooks.EventPostReceive, text.String(), nil)
 
 			// Handle stream errors.
 			select {
@@ -331,8 +330,8 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 						setter.SetMaxOutputTokens(maxTokensCeiling)
 						maxTokensEscalated = true
 					}
-					if text != "" {
-						conv.AddAssistantFull(text, thinkingBlocks, nil)
+					if text.String() != "" {
+						conv.AddAssistantFull(text.String(), thinkingBlocks, nil)
 						a.persistLastMessage(conv)
 						anchorAfterAssistant()
 						conv.AddUserMessage("Output token limit hit. Resume directly from where you stopped. Do not apologize or repeat previous content. Pick up mid-thought if needed.")
@@ -342,7 +341,7 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 				} else if outputRecoveries < maxOutputTokensRecoveries {
 					// Multi-turn recovery.
 					outputRecoveries++
-					conv.AddAssistantFull(text, thinkingBlocks, nil)
+					conv.AddAssistantFull(text.String(), thinkingBlocks, nil)
 					a.persistLastMessage(conv)
 					anchorAfterAssistant()
 					conv.AddUserMessage("Output token limit hit. Resume directly from where you stopped. Break remaining work into smaller pieces.")
@@ -356,10 +355,10 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 			}
 
 			if len(toolCalls) == 0 {
-				conv.AddAssistantFull(text, thinkingBlocks, nil)
+				conv.AddAssistantFull(text.String(), thinkingBlocks, nil)
 				a.persistLastMessage(conv)
 				if a.FileHistory != nil {
-					summary := text
+					summary := text.String()
 					if len(summary) > 60 {
 						summary = summary[:60] + "..."
 					}
@@ -380,7 +379,7 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 					Arguments: tc.Arguments,
 				})
 			}
-			conv.AddAssistantFull(text, thinkingBlocks, toolUses)
+			conv.AddAssistantFull(text.String(), thinkingBlocks, toolUses)
 			a.persistLastMessage(conv)
 			// Anchor real usage to the conversation now that the assistant message
 			// is in place; subsequent tool results + next user message are

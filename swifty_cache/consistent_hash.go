@@ -38,7 +38,7 @@ type ConsistentHashMap struct {
 	hashMap       map[int]string
 	nodeHashes    map[string][]int
 	nodeCounts    map[string]*int64
-	totalRequests int64
+	totalRequests atomic.Int64
 }
 
 // NewConsistentHash creates a consistent hash ring.
@@ -124,7 +124,7 @@ func (m *ConsistentHashMap) Get(key string) string {
 	if counter, ok := m.nodeCounts[node]; ok {
 		atomic.AddInt64(counter, 1)
 	}
-	atomic.AddInt64(&m.totalRequests, 1)
+	m.totalRequests.Add(1)
 	return node
 }
 
@@ -134,8 +134,8 @@ func (m *ConsistentHashMap) addNodeLocked(node string, replicas int) {
 	}
 
 	hashes := make([]int, 0, replicas)
-	for i := 0; i < replicas; i++ {
-		hash := int(m.config.HashFunc([]byte(fmt.Sprintf("%s-%d", node, i))))
+	for i := range replicas {
+		hash := int(m.config.HashFunc(fmt.Appendf(nil, "%s-%d", node, i)))
 		if _, taken := m.hashMap[hash]; taken {
 			// Virtual node hash collision with an existing entry; skip it
 			// instead of silently stealing ownership.
@@ -182,7 +182,7 @@ func (m *ConsistentHashMap) GetStats() map[string]float64 {
 	defer m.mu.RUnlock()
 
 	stats := make(map[string]float64)
-	total := atomic.LoadInt64(&m.totalRequests)
+	total := m.totalRequests.Load()
 	if total == 0 {
 		return stats
 	}

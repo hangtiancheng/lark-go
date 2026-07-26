@@ -23,6 +23,7 @@ package service
 import (
 	"context"
 	"log"
+	"slices"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -226,10 +227,8 @@ func EnterGroupDirectly(ctx context.Context, userId, groupId string) (string, in
 	if group.AddMode != constant.GroupAddModeDirect {
 		return "group requires owner approval", -2
 	}
-	for _, m := range group.Members {
-		if m == userId {
-			return "already a group member", -2
-		}
+	if slices.Contains(group.Members, userId) {
+		return "already a group member", -2
 	}
 
 	if err := addGroupMember(ctx, dao.Engine, groupId, userId); err != nil {
@@ -379,10 +378,8 @@ func RemoveGroupMembers(ctx context.Context, groupId string, memberIds []string)
 		log.Println(err)
 		return constant.SystemError, -1
 	}
-	for _, id := range memberIds {
-		if id == group.OwnerId {
-			return "cannot remove the group owner", -2
-		}
+	if slices.Contains(memberIds, group.OwnerId) {
+		return "cannot remove the group owner", -2
 	}
 
 	if _, err := dao.Engine.Model(&model.GroupInfo{}).Where("uuid", groupId).Update(ctx, bson.M{

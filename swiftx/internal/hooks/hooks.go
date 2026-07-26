@@ -348,9 +348,9 @@ func splitComposite(s string) []compToken {
 
 func evaluateLeaf(condition string, ctx HookContext) bool {
 	for _, op := range []string{"!=", "=~", "=*", "=="} {
-		if idx := strings.Index(condition, op); idx >= 0 {
-			left := strings.TrimSpace(condition[:idx])
-			right := strings.Trim(strings.TrimSpace(condition[idx+len(op):]), `"'`)
+		if before, after, ok := strings.Cut(condition, op); ok {
+			left := strings.TrimSpace(before)
+			right := strings.Trim(strings.TrimSpace(after), `"'`)
 			val := resolveVar(left, ctx)
 			switch op {
 			case "==":
@@ -382,8 +382,8 @@ func resolveVar(name string, ctx HookContext) string {
 	case "message":
 		return ctx.Message
 	}
-	if strings.HasPrefix(name, "args.") {
-		key := strings.TrimPrefix(name, "args.")
+	if after, ok := strings.CutPrefix(name, "args."); ok {
+		key := after
 		if ctx.ToolArgs != nil {
 			if v, ok := ctx.ToolArgs[key]; ok {
 				return fmt.Sprintf("%v", v)

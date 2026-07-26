@@ -239,12 +239,10 @@ func TestServerOptionsAndRegisterConcurrent(t *testing.T) {
 		t.Fatalf("NewServer returned error: %v", err)
 	}
 	var wg sync.WaitGroup
-	for i := 0; i < 16; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 16 {
+		wg.Go(func() {
 			s.Register("Test", &testService{})
-		}()
+		})
 	}
 	wg.Wait()
 	if s.services["Test"] == nil {

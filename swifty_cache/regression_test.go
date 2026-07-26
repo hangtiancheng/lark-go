@@ -44,7 +44,7 @@ func TestLRUStoreMaxBytesEviction(t *testing.T) {
 	defer s.Close()
 
 	// Each entry is 4 (key) + 12 (value) = 16 bytes; 5 entries exceed 64.
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		key := fmt.Sprintf("k%03d", i)
 		if err := s.Set(key, testValue(strings.Repeat("v", 12))); err != nil {
 			t.Fatalf("Set returned error: %v", err)
@@ -250,14 +250,14 @@ func TestAddrFromEventKey(t *testing.T) {
 
 // Concurrent Add/Get/Delete racing with Close must never panic on a nil store.
 func TestCacheConcurrentUseWithClose(t *testing.T) {
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		c := NewCache(CacheOptions{MaxBytes: 1 << 20, CleanupTime: time.Hour})
 		var wg sync.WaitGroup
-		for w := 0; w < 4; w++ {
+		for w := range 4 {
 			wg.Add(1)
 			go func(w int) {
 				defer wg.Done()
-				for j := 0; j < 50; j++ {
+				for j := range 50 {
 					key := fmt.Sprintf("w%d-%d", w, j)
 					c.Add(key, ByteView{b: []byte("v")})
 					c.Get(context.Background(), key)

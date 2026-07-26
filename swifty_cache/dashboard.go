@@ -138,12 +138,7 @@ func buildSnapshot() dashboardSnapshot {
 		entries := g.Entries()
 		entrySnaps := make([]entrySnapshot, len(entries))
 		for i, e := range entries {
-			entrySnaps[i] = entrySnapshot{
-				Key:      e.Key,
-				Size:     e.Size,
-				ExpireAt: e.ExpireAt,
-				Level:    e.Level,
-			}
+			entrySnaps[i] = entrySnapshot(e)
 		}
 
 		snap.Groups = append(snap.Groups, groupSnapshot{

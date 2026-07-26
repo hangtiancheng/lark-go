@@ -64,7 +64,7 @@ func TestDedup(t *testing.T) {
 func TestTrim(t *testing.T) {
 	dir := t.TempDir()
 
-	for i := 0; i < 210; i++ {
+	for i := range 210 {
 		Append(dir, "entry"+string(rune('A'+i%26))+string(rune('0'+i/26)))
 	}
 

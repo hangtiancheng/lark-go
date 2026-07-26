@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/config"
@@ -241,10 +242,7 @@ func (c *openaiCompatClient) Stream(ctx context.Context, conv *conversation.Mana
 			// or arrive in a trailing usage-only chunk for others).
 			if chunk.JSON.Usage.Valid() && chunk.Usage.PromptTokens != 0 {
 				cached := int(chunk.Usage.PromptTokensDetails.CachedTokens)
-				input := int(chunk.Usage.PromptTokens) - cached
-				if input < 0 {
-					input = 0
-				}
+				input := max(int(chunk.Usage.PromptTokens)-cached, 0)
 				stopReason := "end_turn"
 				if finishReason == "tool_calls" {
 					stopReason = "tool_use"
@@ -293,9 +291,9 @@ func buildChatCompletionMessages(systemPrompt string, messages []conversation.Me
 	for _, m := range messages {
 		if m.Role == "assistant" {
 			// Concatenate thinking blocks into reasoning_content for providers like DeepSeek.
-			var reasoning string
+			var reasoning strings.Builder
 			for _, tb := range m.ThinkingBlocks {
-				reasoning += tb.Thinking
+				reasoning.WriteString(tb.Thinking)
 			}
 
 			if len(m.ToolUses) > 0 {
@@ -313,17 +311,17 @@ func buildChatCompletionMessages(systemPrompt string, messages []conversation.Me
 						},
 					})
 				}
-				if reasoning != "" {
-					assistant.SetExtraFields(map[string]any{"reasoning_content": reasoning})
+				if reasoning.String() != "" {
+					assistant.SetExtraFields(map[string]any{"reasoning_content": reasoning.String()})
 				}
 				result = append(result, openai.ChatCompletionMessageParamUnion{OfAssistant: &assistant})
-			} else if m.Content != "" || reasoning != "" {
+			} else if m.Content != "" || reasoning.String() != "" {
 				assistant := openai.ChatCompletionAssistantMessageParam{}
 				if m.Content != "" {
 					assistant.Content.OfString = param.NewOpt(m.Content)
 				}
-				if reasoning != "" {
-					assistant.SetExtraFields(map[string]any{"reasoning_content": reasoning})
+				if reasoning.String() != "" {
+					assistant.SetExtraFields(map[string]any{"reasoning_content": reasoning.String()})
 				}
 				result = append(result, openai.ChatCompletionMessageParamUnion{OfAssistant: &assistant})
 			}

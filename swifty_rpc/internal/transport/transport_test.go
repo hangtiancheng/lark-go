@@ -282,7 +282,7 @@ func TestTCPClientCloseUnblocksPending(t *testing.T) {
 func TestClientStreamTerminalNonBlocking(t *testing.T) {
 	s := NewClientStreamConn(context.Background(), testCodec{})
 	// Fill the data buffer completely.
-	for i := 0; i < 64; i++ {
+	for range 64 {
 		s.Push([]byte("frame"))
 	}
 	// End must not block even though the buffer is full.
@@ -297,7 +297,7 @@ func TestClientStreamTerminalNonBlocking(t *testing.T) {
 		t.Fatal("End blocked on a full stream buffer")
 	}
 	// All buffered frames must still be delivered before EOF.
-	for i := 0; i < 64; i++ {
+	for i := range 64 {
 		var out string
 		if err := s.Recv(&out); err != nil {
 			t.Fatalf("Recv[%d] returned error: %v", i, err)

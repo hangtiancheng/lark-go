@@ -268,8 +268,8 @@ func (q *Query) buildProjection() bson.M {
 	}
 	proj := bson.M{}
 	for _, f := range q.fields {
-		if strings.HasPrefix(f, "-") {
-			proj[strings.TrimPrefix(f, "-")] = 0
+		if after, ok := strings.CutPrefix(f, "-"); ok {
+			proj[after] = 0
 			continue
 		}
 		proj[f] = 1

@@ -323,10 +323,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		statusHeight := 1
 		sepHeight := 2 // top + bottom separators around input
 		inputHeight := m.textarea.Height() + 1
-		vpHeight := msg.Height - statusHeight - sepHeight - inputHeight - 1
-		if vpHeight < 1 {
-			vpHeight = 1
-		}
+		vpHeight := max(msg.Height-statusHeight-sepHeight-inputHeight-1, 1)
 
 		if !m.ready {
 			m.viewport = viewport.New(msg.Width, vpHeight)
@@ -561,7 +558,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			var mcpParts []string
 			for _, srv := range msg.result.Servers {
 				var sb strings.Builder
-				sb.WriteString(fmt.Sprintf("## %s\n", srv.Name))
+				fmt.Fprintf(&sb, "## %s\n", srv.Name)
 				if srv.Instructions != "" {
 					sb.WriteString(srv.Instructions + "\n")
 				}
@@ -683,10 +680,10 @@ func newAgentHookRunner(client llm.Client) func(prompt string, ctx hooks.HookCon
 		conv := conversation.NewManager()
 		conv.AddUserMessage(prompt)
 		events, errs := client.Stream(c, conv, nil)
-		var text string
+		var text strings.Builder
 		for ev := range events {
 			if td, ok := ev.(llm.TextDelta); ok {
-				text += td.Text
+				text.WriteString(td.Text)
 			}
 		}
 		select {
@@ -696,7 +693,7 @@ func newAgentHookRunner(client llm.Client) func(prompt string, ctx hooks.HookCon
 			}
 		default:
 		}
-		return text, nil
+		return text.String(), nil
 	}
 }
 
@@ -950,7 +947,7 @@ func (m *Model) buildSkillSection(wd string) string {
 	skillsDir := filepath.Join(wd, ".swiftx", "skills")
 	var sb strings.Builder
 	sb.WriteString("## Available Skills\n\n")
-	sb.WriteString(fmt.Sprintf("Skills are installed at: %s\n", skillsDir))
+	fmt.Fprintf(&sb, "Skills are installed at: %s\n", skillsDir)
 	sb.WriteString("When creating new skills, always place them under this directory as <skill-name>/SKILL.md.\n\n")
 	sb.WriteString("Only Skill names and one-line descriptions are listed below. To activate a Skill on demand call the LoadSkill tool with {name: \"<skill-name>\"}. After activation the Skill's full SOP gets pinned to the environment context, and any tools the Skill declares get registered. Users can also invoke a Skill directly with /<name>.\n\n")
 	sb.WriteString("If the user pastes a Skill URL (skills.sh, github.com tree URL, or raw SKILL.md URL) and asks to install / add / get it, call the InstallSkill tool with {url: \"<url>\"} — the new Skill becomes available immediately afterwards.\n\n")
@@ -959,7 +956,7 @@ func (m *Model) buildSkillSection(wd string) string {
 		if len(desc) > 200 {
 			desc = desc[:200] + "…"
 		}
-		sb.WriteString(fmt.Sprintf("- /%s: %s\n", meta.Name, desc))
+		fmt.Fprintf(&sb, "- /%s: %s\n", meta.Name, desc)
 	}
 	return sb.String()
 }
@@ -1175,7 +1172,7 @@ func renderRelevantMemoriesReminder(memories []memory.RelevantMemory) string {
 		if err != nil {
 			continue
 		}
-		sb.WriteString(fmt.Sprintf("## Memory: %s (saved %s)\n\n", filepath.Base(mem.Path), memory.MemoryAge(mem.MtimeMs)))
+		fmt.Fprintf(&sb, "## Memory: %s (saved %s)\n\n", filepath.Base(mem.Path), memory.MemoryAge(mem.MtimeMs))
 		if note := memory.MemoryFreshnessText(mem.MtimeMs); note != "" {
 			sb.WriteString(note)
 			sb.WriteString("\n\n")
@@ -1551,12 +1548,9 @@ func stringWidth(s string) int {
 
 func (m *Model) resizeTextarea() {
 	content := m.textarea.Value()
-	textWidth := m.textarea.Width()
-	if textWidth < 1 {
-		textWidth = 1
-	}
+	textWidth := max(m.textarea.Width(), 1)
 	total := 0
-	for _, line := range strings.Split(content, "\n") {
+	for line := range strings.SplitSeq(content, "\n") {
 		w := stringWidth(line)
 		if w <= textWidth {
 			total++
@@ -1564,10 +1558,7 @@ func (m *Model) resizeTextarea() {
 			total += (w + textWidth - 1) / textWidth
 		}
 	}
-	maxH := m.height / 2
-	if maxH < 1 {
-		maxH = 1
-	}
+	maxH := max(m.height/2, 1)
 	if total > maxH {
 		total = maxH
 	}
@@ -2165,7 +2156,7 @@ func (m Model) renderPlanApprovalDialog() string {
 			label = lipgloss.NewStyle().Foreground(dimText).Render(opt)
 		}
 		sb.WriteString(prefix)
-		sb.WriteString(fmt.Sprintf("%d. %s", i+1, label))
+		fmt.Fprintf(&sb, "%d. %s", i+1, label)
 		sb.WriteString("\n")
 
 		if i == 2 {
@@ -2302,7 +2293,7 @@ func (m Model) renderSandboxDialog() string {
 			displayLabel = lipgloss.NewStyle().Foreground(dimText).Render(label)
 		}
 		desc := lipgloss.NewStyle().Foreground(dimText).Render(" — " + descs[i])
-		sb.WriteString(fmt.Sprintf("%s%d. %s%s\n", prefix, i+1, displayLabel, desc))
+		fmt.Fprintf(&sb, "%s%d. %s%s\n", prefix, i+1, displayLabel, desc)
 	}
 	sb.WriteString("\n")
 	return sb.String()
@@ -2591,7 +2582,7 @@ func (m Model) renderQuestionView() string {
 			label = lipgloss.NewStyle().Bold(true).Render(opt.Label)
 		}
 		desc := lipgloss.NewStyle().Foreground(dimText).Render(" — " + opt.Description)
-		sb.WriteString(fmt.Sprintf("%s%s%s\n", prefix, label, desc))
+		fmt.Fprintf(&sb, "%s%s%s\n", prefix, label, desc)
 		lines++
 	}
 
@@ -2607,7 +2598,7 @@ func (m Model) renderQuestionView() string {
 	} else {
 		otherLabel = lipgloss.NewStyle().Foreground(dimText).Render("Other")
 	}
-	sb.WriteString(fmt.Sprintf("%s%s", prefix, otherLabel))
+	fmt.Fprintf(&sb, "%s%s", prefix, otherLabel)
 	if cursor == otherIdx {
 		input := m.askUserOther[m.askUserQIdx] + "█"
 		sb.WriteString(": " + input)
@@ -2649,7 +2640,7 @@ func (m Model) renderSubmitView() string {
 		}
 		answer, ok := m.askUserAnswered[i]
 		if ok {
-			sb.WriteString(fmt.Sprintf("   %s: %s\n", label, answer))
+			fmt.Fprintf(&sb, "   %s: %s\n", label, answer)
 		} else {
 			dim := lipgloss.NewStyle().Foreground(dimText).Render(fmt.Sprintf("   %s: (not answered)", label))
 			sb.WriteString(dim + "\n")
@@ -3238,10 +3229,7 @@ func renderToolGroupSummary(tools []toolBlockInfo) string {
 }
 
 func (m *Model) calcViewportHeight(availableHeight int) int {
-	contentLines := m.viewport.TotalLineCount()
-	if contentLines < 1 {
-		contentLines = 1
-	}
+	contentLines := max(m.viewport.TotalLineCount(), 1)
 	if contentLines > availableHeight {
 		return availableHeight
 	}
@@ -3257,10 +3245,7 @@ func (m *Model) updateViewport() {
 
 	statusHeight, sepHeight := 1, 1
 	inputHeight := m.textarea.Height() + 1
-	available := m.height - statusHeight - sepHeight - inputHeight - 1
-	if available < 1 {
-		available = 1
-	}
+	available := max(m.height-statusHeight-sepHeight-inputHeight-1, 1)
 	m.viewport.Height = m.calcViewportHeight(available)
 
 	if !m.userScrolled {
@@ -3379,10 +3364,7 @@ func (m Model) renderChatView() string {
 		if m.permDialog {
 			bottomLines += 3
 		}
-		vpH := m.height - bottomLines
-		if vpH < 1 {
-			vpH = 1
-		}
+		vpH := max(m.height-bottomLines, 1)
 		m.viewport.Height = m.calcViewportHeight(vpH)
 		sb.WriteString(m.viewport.View())
 		sb.WriteString("\n")
@@ -3484,10 +3466,7 @@ func (m Model) renderStatusBar() string {
 		right += statusItemStyle.Render(m.selectedProvider.Model)
 	}
 
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 2
-	if gap < 0 {
-		gap = 0
-	}
+	gap := max(m.width-lipgloss.Width(left)-lipgloss.Width(right)-2, 0)
 	return left + strings.Repeat(" ", gap) + right
 }
 
@@ -3825,10 +3804,7 @@ func (m Model) renderRewindSnapshotList() string {
 	if m.rewindCursor >= maxVisible {
 		start = m.rewindCursor - maxVisible + 1
 	}
-	end := start + maxVisible
-	if end > len(m.rewindSnapshots) {
-		end = len(m.rewindSnapshots)
-	}
+	end := min(start+maxVisible, len(m.rewindSnapshots))
 
 	for i := start; i < end; i++ {
 		snap := m.rewindSnapshots[i]
@@ -3960,8 +3936,8 @@ func indentBlock(text string, prefix string) string {
 }
 
 func (m Model) pastTense(verb string) string {
-	if strings.HasSuffix(verb, "ing") {
-		stem := strings.TrimSuffix(verb, "ing")
+	if before, ok := strings.CutSuffix(verb, "ing"); ok {
+		stem := before
 		if strings.HasSuffix(stem, "at") || strings.HasSuffix(stem, "ut") ||
 			strings.HasSuffix(stem, "it") || strings.HasSuffix(stem, "et") {
 			return stem + "ed"
@@ -4360,10 +4336,7 @@ func (m Model) renderResumeView() string {
 	} else {
 		searchText = "⌕ " + searchText
 	}
-	boxWidth := m.width - 6
-	if boxWidth < 20 {
-		boxWidth = 20
-	}
+	boxWidth := max(m.width-6, 20)
 	border := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("240")).
@@ -4379,10 +4352,7 @@ func (m Model) renderResumeView() string {
 	sb.WriteString("\n\n")
 
 	// Session list
-	maxVisible := m.resumeVisibleCount()
-	if maxVisible > total {
-		maxVisible = total
-	}
+	maxVisible := min(m.resumeVisibleCount(), total)
 
 	for i := m.resumeScrollTop; i < m.resumeScrollTop+maxVisible && i < total; i++ {
 		s := m.resumeFiltered[i]

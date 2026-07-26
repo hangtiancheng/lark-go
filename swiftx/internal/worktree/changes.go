@@ -63,7 +63,7 @@ func CountWorktreeChanges(ctx context.Context, worktreePath, originalHeadCommit 
 		return nil // fail-closed
 	}
 	changedFiles := 0
-	for _, line := range strings.Split(stdout, "\n") {
+	for line := range strings.SplitSeq(stdout, "\n") {
 		if strings.TrimSpace(line) != "" {
 			changedFiles++
 		}

@@ -53,7 +53,7 @@ func ValidateWorktreeSlug(slug string) error {
 	// Leading or trailing `/` would make filepath.Join produce an absolute path or a dangling segment.
 	// Splitting and validating each segment rejects both (empty segments fail the regex) while
 	// allowing `user/feature`.
-	for _, segment := range strings.Split(slug, "/") {
+	for segment := range strings.SplitSeq(slug, "/") {
 		if segment == "." || segment == ".." {
 			return fmt.Errorf(
 				`Invalid worktree name %q: must not contain "." or ".." path segments`,

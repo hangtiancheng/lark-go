@@ -33,10 +33,10 @@ type Cache struct {
 	mu          sync.RWMutex
 	store       Store
 	opts        CacheOptions
-	hits        int64
-	misses      int64
-	initialized int32
-	closed      int32
+	hits        atomic.Int64
+	misses      atomic.Int64
+	initialized atomic.Int32
+	closed      atomic.Int32
 }
 
 // CacheOptions configures the underlying cache store.
@@ -68,17 +68,17 @@ func NewCache(opts CacheOptions) *Cache {
 }
 
 func (c *Cache) ensureInitialized() {
-	if atomic.LoadInt32(&c.initialized) == 1 {
+	if c.initialized.Load() == 1 {
 		return
 	}
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if atomic.LoadInt32(&c.closed) == 1 {
+	if c.closed.Load() == 1 {
 		return
 	}
-	if atomic.LoadInt32(&c.initialized) == 0 {
+	if c.initialized.Load() == 0 {
 		storeOpts := StoreOptions{
 			MaxBytes:        c.opts.MaxBytes,
 			BucketCount:     c.opts.BucketCount,
@@ -88,14 +88,14 @@ func (c *Cache) ensureInitialized() {
 			OnEvicted:       c.opts.OnEvicted,
 		}
 		c.store = NewStore(storeOpts)
-		atomic.StoreInt32(&c.initialized, 1)
+		c.initialized.Store(1)
 		log.Printf("Cache initialized, max bytes: %d", c.opts.MaxBytes)
 	}
 }
 
 // Add stores a key-value pair.
 func (c *Cache) Add(key string, value ByteView) {
-	if atomic.LoadInt32(&c.closed) == 1 {
+	if c.closed.Load() == 1 {
 		log.Printf("Attempted to add to a closed cache: %s", key)
 		return
 	}
@@ -114,11 +114,11 @@ func (c *Cache) Add(key string, value ByteView) {
 
 // Get returns a cached value when it exists and has not expired.
 func (c *Cache) Get(ctx context.Context, key string) (ByteView, bool) {
-	if atomic.LoadInt32(&c.closed) == 1 {
+	if c.closed.Load() == 1 {
 		return ByteView{}, false
 	}
-	if atomic.LoadInt32(&c.initialized) == 0 {
-		atomic.AddInt64(&c.misses, 1)
+	if c.initialized.Load() == 0 {
+		c.misses.Add(1)
 		return ByteView{}, false
 	}
 
@@ -126,30 +126,30 @@ func (c *Cache) Get(ctx context.Context, key string) (ByteView, bool) {
 	defer c.mu.RUnlock()
 
 	if c.store == nil {
-		atomic.AddInt64(&c.misses, 1)
+		c.misses.Add(1)
 		return ByteView{}, false
 	}
 
 	val, found := c.store.Get(key)
 	if !found {
-		atomic.AddInt64(&c.misses, 1)
+		c.misses.Add(1)
 		return ByteView{}, false
 	}
 
 	bv, ok := val.(ByteView)
 	if !ok {
 		log.Printf("Type assertion failed for key %s, expected ByteView", key)
-		atomic.AddInt64(&c.misses, 1)
+		c.misses.Add(1)
 		return ByteView{}, false
 	}
 
-	atomic.AddInt64(&c.hits, 1)
+	c.hits.Add(1)
 	return bv, true
 }
 
 // AddWithExpiration stores a key-value pair with an absolute expiration time.
 func (c *Cache) AddWithExpiration(key string, value ByteView, expirationTime time.Time) {
-	if atomic.LoadInt32(&c.closed) == 1 {
+	if c.closed.Load() == 1 {
 		log.Printf("Attempted to add to a closed cache: %s", key)
 		return
 	}
@@ -174,7 +174,7 @@ func (c *Cache) AddWithExpiration(key string, value ByteView, expirationTime tim
 
 // Delete removes a key from the cache.
 func (c *Cache) Delete(key string) bool {
-	if atomic.LoadInt32(&c.closed) == 1 || atomic.LoadInt32(&c.initialized) == 0 {
+	if c.closed.Load() == 1 || c.initialized.Load() == 0 {
 		return false
 	}
 
@@ -188,7 +188,7 @@ func (c *Cache) Delete(key string) bool {
 
 // Clear removes all cached values and resets hit/miss counters.
 func (c *Cache) Clear() {
-	if atomic.LoadInt32(&c.closed) == 1 || atomic.LoadInt32(&c.initialized) == 0 {
+	if c.closed.Load() == 1 || c.initialized.Load() == 0 {
 		return
 	}
 
@@ -199,13 +199,13 @@ func (c *Cache) Clear() {
 		return
 	}
 	c.store.Clear()
-	atomic.StoreInt64(&c.hits, 0)
-	atomic.StoreInt64(&c.misses, 0)
+	c.hits.Store(0)
+	c.misses.Store(0)
 }
 
 // Len returns the number of stored entries.
 func (c *Cache) Len() int {
-	if atomic.LoadInt32(&c.closed) == 1 || atomic.LoadInt32(&c.initialized) == 0 {
+	if c.closed.Load() == 1 || c.initialized.Load() == 0 {
 		return 0
 	}
 
@@ -219,7 +219,7 @@ func (c *Cache) Len() int {
 
 // Close releases cache resources. It is safe to call more than once.
 func (c *Cache) Close() {
-	if !atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
+	if !c.closed.CompareAndSwap(0, 1) {
 		return
 	}
 
@@ -230,8 +230,8 @@ func (c *Cache) Close() {
 		c.store.Close()
 		c.store = nil
 	}
-	atomic.StoreInt32(&c.initialized, 0)
-	log.Printf("Cache closed, hits: %d, misses: %d", atomic.LoadInt64(&c.hits), atomic.LoadInt64(&c.misses))
+	c.initialized.Store(0)
+	log.Printf("Cache closed, hits: %d, misses: %d", c.hits.Load(), c.misses.Load())
 }
 
 // DashboardEnabled reports whether the dashboard is enabled for this cache.
@@ -241,7 +241,7 @@ func (c *Cache) DashboardEnabled() bool {
 
 // Entries returns all live cache entries.
 func (c *Cache) Entries() []Entry {
-	if atomic.LoadInt32(&c.closed) == 1 || atomic.LoadInt32(&c.initialized) == 0 {
+	if c.closed.Load() == 1 || c.initialized.Load() == 0 {
 		return nil
 	}
 
@@ -263,13 +263,13 @@ func (c *Cache) Entries() []Entry {
 // Stats returns a cache statistics snapshot.
 func (c *Cache) Stats() map[string]any {
 	stats := map[string]any{
-		"initialized": atomic.LoadInt32(&c.initialized) == 1,
-		"closed":      atomic.LoadInt32(&c.closed) == 1,
-		"hits":        atomic.LoadInt64(&c.hits),
-		"misses":      atomic.LoadInt64(&c.misses),
+		"initialized": c.initialized.Load() == 1,
+		"closed":      c.closed.Load() == 1,
+		"hits":        c.hits.Load(),
+		"misses":      c.misses.Load(),
 	}
 
-	if atomic.LoadInt32(&c.initialized) == 1 {
+	if c.initialized.Load() == 1 {
 		stats["size"] = c.Len()
 		totalRequests := stats["hits"].(int64) + stats["misses"].(int64)
 		if totalRequests > 0 {

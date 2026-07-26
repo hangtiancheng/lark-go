@@ -317,7 +317,7 @@ func formatInboundAsPrompt(msgs []FileMailMessage) string {
 	var sb strings.Builder
 	sb.WriteString("You have new messages from your team:\n\n")
 	for _, m := range msgs {
-		sb.WriteString(fmt.Sprintf("From %s: %s\n\n", m.From, m.Text))
+		fmt.Fprintf(&sb, "From %s: %s\n\n", m.From, m.Text)
 	}
 	return sb.String()
 }

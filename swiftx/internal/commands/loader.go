@@ -160,7 +160,7 @@ func splitFrontmatter(content string) (CommandMeta, string) {
 // firstNonHeaderLine returns the first non-empty, non-heading line — used as a description fallback
 // when frontmatter doesn't supply one.
 func firstNonHeaderLine(body string) string {
-	for _, line := range strings.Split(body, "\n") {
+	for line := range strings.SplitSeq(body, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue

@@ -20,7 +20,10 @@
 
 package prompt
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 func IdentitySection() Section {
 	return Section{
@@ -234,12 +237,12 @@ func EnvironmentSection(env EnvironmentContext) Section {
 }
 
 func joinLines(lines []string) string {
-	result := ""
+	var result strings.Builder
 	for i, l := range lines {
 		if i > 0 {
-			result += "\n"
+			result.WriteString("\n")
 		}
-		result += l
+		result.WriteString(l)
 	}
-	return result
+	return result.String()
 }

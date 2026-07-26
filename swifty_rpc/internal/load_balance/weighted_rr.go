@@ -69,7 +69,7 @@ func (w *WeightedRR) Select(list []registry.Instance) registry.Instance {
 	}
 
 	maxIdx := -1
-	for i := 0; i < len(list); i++ {
+	for i := range list {
 		w.currentWeight[i] += w.weights[i]
 
 		if maxIdx == -1 || w.currentWeight[i] > w.currentWeight[maxIdx] {

@@ -81,10 +81,7 @@ func (t *ReadFileTool) Execute(_ context.Context, args map[string]any) ToolResul
 	if offset >= len(lines) {
 		return ToolResult{Output: ""}
 	}
-	end := offset + limit
-	if end > len(lines) {
-		end = len(lines)
-	}
+	end := min(offset+limit, len(lines))
 	selected := lines[offset:end]
 
 	// Record file state for read-before-edit enforcement

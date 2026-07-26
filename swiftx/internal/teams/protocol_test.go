@@ -119,7 +119,7 @@ func TestTypedFieldsSurviveJSON(t *testing.T) {
 
 func TestRequestIDsAreUnique(t *testing.T) {
 	seen := map[string]bool{}
-	for i := 0; i < 200; i++ {
+	for range 200 {
 		id := NewRequestID()
 		if seen[id] {
 			t.Fatalf("request ID collision: %s", id)

@@ -24,11 +24,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
+	"maps"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"log"
 )
 
 var (
@@ -64,22 +64,22 @@ type Group struct {
 	peers      PeerPicker
 	loader     *SingleFlightGroup
 	expiration time.Duration
-	closed     int32
+	closed     atomic.Int32
 	stats      groupStats
 }
 
 type groupStats struct {
-	gets           int64
-	loads          int64
-	loadsDeduped   int64
-	localHits      int64
-	localMisses    int64
-	peerHits       int64
-	peerMisses     int64
-	loaderHits     int64
-	loaderErrors   int64
-	serverRequests int64
-	loadDuration   int64
+	gets           atomic.Int64
+	loads          atomic.Int64
+	loadsDeduped   atomic.Int64
+	localHits      atomic.Int64
+	localMisses    atomic.Int64
+	peerHits       atomic.Int64
+	peerMisses     atomic.Int64
+	loaderHits     atomic.Int64
+	loaderErrors   atomic.Int64
+	serverRequests atomic.Int64
+	loadDuration   atomic.Int64
 }
 
 // GroupOption configures a Group.
@@ -152,28 +152,28 @@ func GetGroup(name string) *Group {
 
 // Get returns a value from cache or loads it on miss.
 func (g *Group) Get(ctx context.Context, key string) (ByteView, error) {
-	if atomic.LoadInt32(&g.closed) == 1 {
+	if g.closed.Load() == 1 {
 		return ByteView{}, ErrGroupClosed
 	}
 	if key == "" {
 		return ByteView{}, ErrKeyRequired
 	}
 
-	atomic.AddInt64(&g.stats.gets, 1)
+	g.stats.gets.Add(1)
 
 	view, ok := g.mainCache.Get(ctx, key)
 	if ok {
-		atomic.AddInt64(&g.stats.localHits, 1)
+		g.stats.localHits.Add(1)
 		return view, nil
 	}
 
-	atomic.AddInt64(&g.stats.localMisses, 1)
+	g.stats.localMisses.Add(1)
 	return g.load(ctx, key)
 }
 
 // Set stores a value in the local cache and optionally syncs it to the owning peer.
 func (g *Group) Set(ctx context.Context, key string, value []byte) error {
-	if atomic.LoadInt32(&g.closed) == 1 {
+	if g.closed.Load() == 1 {
 		return ErrGroupClosed
 	}
 	if key == "" {
@@ -201,7 +201,7 @@ func (g *Group) Set(ctx context.Context, key string, value []byte) error {
 
 // Delete removes a value from the local cache and optionally syncs the deletion.
 func (g *Group) Delete(ctx context.Context, key string) error {
-	if atomic.LoadInt32(&g.closed) == 1 {
+	if g.closed.Load() == 1 {
 		return ErrGroupClosed
 	}
 	if key == "" {
@@ -247,7 +247,7 @@ func (g *Group) syncToPeers(peers PeerPicker, op string, key string, value []byt
 
 // Clear removes all local cached values.
 func (g *Group) Clear() {
-	if atomic.LoadInt32(&g.closed) == 1 {
+	if g.closed.Load() == 1 {
 		return
 	}
 	g.mainCache.Clear()
@@ -256,7 +256,7 @@ func (g *Group) Clear() {
 
 // Close closes the group and removes it from the global registry.
 func (g *Group) Close() error {
-	if !atomic.CompareAndSwapInt32(&g.closed, 0, 1) {
+	if !g.closed.CompareAndSwap(0, 1) {
 		return nil
 	}
 
@@ -281,7 +281,7 @@ func (g *Group) load(ctx context.Context, key string) (ByteView, error) {
 			return view, nil
 		}
 
-		atomic.AddInt64(&g.stats.loadsDeduped, 1)
+		g.stats.loadsDeduped.Add(1)
 
 		view, err := g.loadData(ctx, key)
 		if err != nil {
@@ -297,17 +297,17 @@ func (g *Group) load(ctx context.Context, key string) (ByteView, error) {
 	})
 
 	loadDuration := time.Since(startTime).Nanoseconds()
-	atomic.AddInt64(&g.stats.loadDuration, loadDuration)
-	atomic.AddInt64(&g.stats.loads, 1)
+	g.stats.loadDuration.Add(loadDuration)
+	g.stats.loads.Add(1)
 
 	if err != nil {
-		atomic.AddInt64(&g.stats.loaderErrors, 1)
+		g.stats.loaderErrors.Add(1)
 		return ByteView{}, err
 	}
 
 	view, ok := viewInterface.(ByteView)
 	if !ok {
-		atomic.AddInt64(&g.stats.loaderErrors, 1)
+		g.stats.loaderErrors.Add(1)
 		return ByteView{}, fmt.Errorf("unexpected load result type %T", viewInterface)
 	}
 	return view, nil
@@ -321,11 +321,11 @@ func (g *Group) loadData(ctx context.Context, key string) (ByteView, error) {
 		if ok && !isSelf && peer != nil {
 			value, err := g.getFromPeer(ctx, peer, key)
 			if err == nil {
-				atomic.AddInt64(&g.stats.peerHits, 1)
+				g.stats.peerHits.Add(1)
 				return value, nil
 			}
 
-			atomic.AddInt64(&g.stats.peerMisses, 1)
+			g.stats.peerMisses.Add(1)
 			log.Printf("[SwiftyCache] failed to get from peer: %v", err)
 		}
 	}
@@ -335,7 +335,7 @@ func (g *Group) loadData(ctx context.Context, key string) (ByteView, error) {
 		return ByteView{}, fmt.Errorf("failed to get data: %w", err)
 	}
 
-	atomic.AddInt64(&g.stats.loaderHits, 1)
+	g.stats.loaderHits.Add(1)
 	return ByteView{b: cloneBytes(bytes)}, nil
 }
 
@@ -368,18 +368,18 @@ func (g *Group) getPeers() PeerPicker {
 func (g *Group) Stats() map[string]any {
 	stats := map[string]any{
 		"name":            g.name,
-		"closed":          atomic.LoadInt32(&g.closed) == 1,
+		"closed":          g.closed.Load() == 1,
 		"expiration":      g.expiration,
-		"gets":            atomic.LoadInt64(&g.stats.gets),
-		"loads":           atomic.LoadInt64(&g.stats.loads),
-		"loads_deduped":   atomic.LoadInt64(&g.stats.loadsDeduped),
-		"local_hits":      atomic.LoadInt64(&g.stats.localHits),
-		"local_misses":    atomic.LoadInt64(&g.stats.localMisses),
-		"peer_hits":       atomic.LoadInt64(&g.stats.peerHits),
-		"peer_misses":     atomic.LoadInt64(&g.stats.peerMisses),
-		"loader_hits":     atomic.LoadInt64(&g.stats.loaderHits),
-		"loader_errors":   atomic.LoadInt64(&g.stats.loaderErrors),
-		"server_requests": atomic.LoadInt64(&g.stats.serverRequests),
+		"gets":            g.stats.gets.Load(),
+		"loads":           g.stats.loads.Load(),
+		"loads_deduped":   g.stats.loadsDeduped.Load(),
+		"local_hits":      g.stats.localHits.Load(),
+		"local_misses":    g.stats.localMisses.Load(),
+		"peer_hits":       g.stats.peerHits.Load(),
+		"peer_misses":     g.stats.peerMisses.Load(),
+		"loader_hits":     g.stats.loaderHits.Load(),
+		"loader_errors":   g.stats.loaderErrors.Load(),
+		"server_requests": g.stats.serverRequests.Load(),
 	}
 
 	totalGets := stats["local_hits"].(int64) + stats["local_misses"].(int64)
@@ -389,7 +389,7 @@ func (g *Group) Stats() map[string]any {
 
 	totalLoads := stats["loads"].(int64)
 	if totalLoads > 0 {
-		stats["avg_load_time_ms"] = float64(atomic.LoadInt64(&g.stats.loadDuration)) / float64(totalLoads) / float64(time.Millisecond)
+		stats["avg_load_time_ms"] = float64(g.stats.loadDuration.Load()) / float64(totalLoads) / float64(time.Millisecond)
 	}
 
 	if g.mainCache != nil {
@@ -409,7 +409,7 @@ func (g *Group) DashboardEnabled() bool {
 
 // Entries returns all live entries in the group's local cache.
 func (g *Group) Entries() []Entry {
-	if atomic.LoadInt32(&g.closed) == 1 || g.mainCache == nil {
+	if g.closed.Load() == 1 || g.mainCache == nil {
 		return nil
 	}
 	return g.mainCache.Entries()
@@ -421,9 +421,7 @@ func GetAllGroups() map[string]*Group {
 	defer groupsMu.RUnlock()
 
 	result := make(map[string]*Group, len(groups))
-	for name, g := range groups {
-		result[name] = g
-	}
+	maps.Copy(result, groups)
 	return result
 }
 

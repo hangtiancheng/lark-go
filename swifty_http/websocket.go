@@ -392,14 +392,14 @@ func (ws *WSConn) readFrame() (opcode int, fin bool, payload []byte, err error) 
 		return 0, false, nil, ErrWSInvalidFrame
 	}
 
-	switch {
-	case length == 126:
+	switch length {
+	case 126:
 		ext := make([]byte, 2)
 		if _, err := io.ReadFull(ws.br, ext); err != nil {
 			return 0, false, nil, err
 		}
 		length = uint64(binary.BigEndian.Uint16(ext))
-	case length == 127:
+	case 127:
 		ext := make([]byte, 8)
 		if _, err := io.ReadFull(ws.br, ext); err != nil {
 			return 0, false, nil, err
@@ -533,7 +533,7 @@ func computeAcceptKey(key string) string {
 
 func headerContains(h http.Header, key string, value string) bool {
 	for _, v := range h[http.CanonicalHeaderKey(key)] {
-		for _, s := range strings.Split(v, ",") {
+		for s := range strings.SplitSeq(v, ",") {
 			if strings.EqualFold(strings.TrimSpace(s), value) {
 				return true
 			}
@@ -544,7 +544,7 @@ func headerContains(h http.Header, key string, value string) bool {
 
 func negotiateSubprotocol(clientHeader string, serverProtocols []string) string {
 	for _, sp := range serverProtocols {
-		for _, cp := range strings.Split(clientHeader, ",") {
+		for cp := range strings.SplitSeq(clientHeader, ",") {
 			if strings.TrimSpace(cp) == sp {
 				return sp
 			}

@@ -114,7 +114,7 @@ func FilterToolsForAgentEx(reg *tools.Registry, allowedTools, disallowedTools []
 	}
 
 	allowed := make(map[string]bool, len(allowedTools))
-	hasWhitelist := len(allowedTools) > 0 && !(len(allowedTools) == 1 && allowedTools[0] == "*")
+	hasWhitelist := len(allowedTools) > 0 && (len(allowedTools) != 1 || allowedTools[0] != "*")
 	for _, name := range allowedTools {
 		allowed[name] = true
 	}

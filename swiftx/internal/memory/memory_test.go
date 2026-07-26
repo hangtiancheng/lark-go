@@ -116,7 +116,7 @@ func TestTruncateEntrypointContent(t *testing.T) {
 
 	t.Run("line cap", func(t *testing.T) {
 		var lines []string
-		for i := 0; i < MaxEntrypointLines+10; i++ {
+		for range MaxEntrypointLines + 10 {
 			lines = append(lines, "x")
 		}
 		raw := strings.Join(lines, "\n")

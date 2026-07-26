@@ -25,6 +25,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -212,21 +213,22 @@ func globMatch(pattern, content string) bool {
 		return pattern == content
 	}
 	// Convert pattern to regex: * → .*, ? → .
-	re := "^"
+	var re strings.Builder
+	re.WriteString("^")
 	for _, ch := range pattern {
 		switch ch {
 		case '*':
-			re += ".*"
+			re.WriteString(".*")
 		case '?':
-			re += "."
+			re.WriteString(".")
 		case '.', '+', '^', '$', '{', '}', '(', ')', '|', '[', ']', '\\':
-			re += "\\" + string(ch)
+			re.WriteString("\\" + string(ch))
 		default:
-			re += string(ch)
+			re.WriteString(string(ch))
 		}
 	}
-	re += "$"
-	matched, _ := regexp.MatchString(re, content)
+	re.WriteString("$")
+	matched, _ := regexp.MatchString(re.String(), content)
 	return matched
 }
 
@@ -239,9 +241,9 @@ type RuleEngine struct {
 func (e *RuleEngine) Evaluate(toolName, content string) *RuleEffect {
 	for _, path := range []string{e.UserPath, e.ProjectPath, e.LocalPath} {
 		rules := loadRulesFile(path)
-		for i := len(rules) - 1; i >= 0; i-- {
-			if rules[i].Matches(toolName, content) {
-				eff := rules[i].Effect
+		for _, v := range slices.Backward(rules) {
+			if v.Matches(toolName, content) {
+				eff := v.Effect
 				return &eff
 			}
 		}

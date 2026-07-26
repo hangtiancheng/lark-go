@@ -37,12 +37,12 @@ type TCPClient struct {
 	addr string
 
 	writeMu sync.Mutex
-	seq     uint64
+	seq     atomic.Uint64
 
 	pending sync.Map // map[uint64]*Future
 	streams sync.Map // map[uint64]*ClientStreamConn
 
-	closed int32
+	closed atomic.Int32
 }
 
 func newTCPClient(addr string) (*TCPClient, error) {
@@ -61,7 +61,7 @@ func newTCPClient(addr string) (*TCPClient, error) {
 }
 
 func (c *TCPClient) nextSeq() uint64 {
-	return atomic.AddUint64(&c.seq, 1)
+	return c.seq.Add(1)
 }
 
 func (c *TCPClient) SendAsync(msg *protocol.Message) (*Future, error) {
@@ -69,7 +69,7 @@ func (c *TCPClient) SendAsync(msg *protocol.Message) (*Future, error) {
 }
 
 func (c *TCPClient) SendAsyncWithCodec(msg *protocol.Message, cc codec.Codec) (*Future, error) {
-	if atomic.LoadInt32(&c.closed) == 1 {
+	if c.closed.Load() == 1 {
 		return nil, errors.New("connection closed")
 	}
 
@@ -81,7 +81,7 @@ func (c *TCPClient) SendAsyncWithCodec(msg *protocol.Message, cc codec.Codec) (*
 
 	// Re-check after Store: a concurrent fail() may have drained pending
 	// before our entry was visible, which would leak the future forever.
-	if atomic.LoadInt32(&c.closed) == 1 {
+	if c.closed.Load() == 1 {
 		if _, ok := c.pending.LoadAndDelete(seq); ok {
 			return nil, errors.New("connection closed")
 		}
@@ -139,7 +139,7 @@ func (c *TCPClient) readLoop() {
 }
 
 func (c *TCPClient) SendStream(ctx context.Context, msg *protocol.Message, cc codec.Codec) (*ClientStreamConn, error) {
-	if atomic.LoadInt32(&c.closed) == 1 {
+	if c.closed.Load() == 1 {
 		return nil, errors.New("connection closed")
 	}
 
@@ -149,7 +149,7 @@ func (c *TCPClient) SendStream(ctx context.Context, msg *protocol.Message, cc co
 	stream := NewClientStreamConn(ctx, cc)
 	c.streams.Store(seq, stream)
 
-	if atomic.LoadInt32(&c.closed) == 1 {
+	if c.closed.Load() == 1 {
 		if _, ok := c.streams.LoadAndDelete(seq); ok {
 			return nil, errors.New("connection closed")
 		}
@@ -173,7 +173,7 @@ func (c *TCPClient) fail(err error) {
 }
 
 func (c *TCPClient) shutdown(err error) {
-	if !atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
+	if !c.closed.CompareAndSwap(0, 1) {
 		return
 	}
 

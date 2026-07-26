@@ -102,7 +102,7 @@ func TestScanMemoryFilesRecursive(t *testing.T) {
 
 func TestScanMemoryFilesCap(t *testing.T) {
 	dir := t.TempDir()
-	for i := 0; i < MaxMemoryFiles+50; i++ {
+	for i := range MaxMemoryFiles + 50 {
 		writeMD(t, filepath.Join(dir, fmt.Sprintf("m%03d.md", i)), "---\ntype: user\n---\nbody")
 	}
 	got, _ := ScanMemoryFiles(context.Background(), dir, "")
@@ -160,7 +160,7 @@ func TestFormatMemoryManifest(t *testing.T) {
 
 func TestScanMemoryFilesContextCancel(t *testing.T) {
 	dir := t.TempDir()
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		writeMD(t, filepath.Join(dir, fmt.Sprintf("m%d.md", i)), "---\ntype: user\n---\nbody")
 	}
 	ctx, cancel := context.WithCancel(context.Background())

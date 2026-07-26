@@ -126,8 +126,8 @@ func fakeGitHub(t *testing.T) *httptest.Server {
 	noteMD := "extra reference"
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/repos/foo/bar/contents/skills/sample":
+		switch r.URL.Path {
+		case "/repos/foo/bar/contents/skills/sample":
 			entries := []contentEntry{
 				{Name: "SKILL.md", Path: "skills/sample/SKILL.md", Type: "file", Size: len(skillMD),
 					Encoding: "base64", Content: base64.StdEncoding.EncodeToString([]byte(skillMD))},
@@ -135,7 +135,7 @@ func fakeGitHub(t *testing.T) *httptest.Server {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(entries)
-		case r.URL.Path == "/repos/foo/bar/contents/skills/sample/references":
+		case "/repos/foo/bar/contents/skills/sample/references":
 			entries := []contentEntry{
 				{Name: "note.md", Path: "skills/sample/references/note.md", Type: "file", Size: len(noteMD),
 					Encoding: "base64", Content: base64.StdEncoding.EncodeToString([]byte(noteMD))},

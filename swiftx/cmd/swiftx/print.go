@@ -209,7 +209,7 @@ func runPrint(userPrompt string, cfg *config.AppConfig, hookCfgs []hooks.Hook, o
 	ch := ag.Run(ctx, conv)
 
 	start := time.Now()
-	var textBuf string
+	var textBuf strings.Builder
 	var totalInput, totalOutput int
 	var toolCalls []toolCallInfo
 	isJSON := outputFormat == "stream-json"
@@ -217,7 +217,7 @@ func runPrint(userPrompt string, cfg *config.AppConfig, hookCfgs []hooks.Hook, o
 	for ev := range ch {
 		switch e := ev.(type) {
 		case agent.StreamText:
-			textBuf += e.Text
+			textBuf.WriteString(e.Text)
 			if isJSON {
 				emitJSON(map[string]any{"type": "assistant", "text": e.Text})
 			}
@@ -274,7 +274,7 @@ func runPrint(userPrompt string, cfg *config.AppConfig, hookCfgs []hooks.Hook, o
 			if isJSON {
 				emitJSON(printResult{
 					Type:       "result",
-					Result:     textBuf,
+					Result:     textBuf.String(),
 					DurationMs: elapsed.Milliseconds(),
 					NumTurns:   e.TotalTurns,
 					ToolCalls:  toolCalls,
@@ -282,7 +282,7 @@ func runPrint(userPrompt string, cfg *config.AppConfig, hookCfgs []hooks.Hook, o
 					StopReason: "end_turn",
 				})
 			} else {
-				fmt.Print(textBuf)
+				fmt.Print(textBuf.String())
 			}
 			return nil
 
@@ -343,7 +343,7 @@ func buildPrintSkillSection(catalog *skills.Catalog) string {
 		if len(desc) > 200 {
 			desc = desc[:200] + "…"
 		}
-		sb.WriteString(fmt.Sprintf("- /%s: %s\n", meta.Name, desc))
+		fmt.Fprintf(&sb, "- /%s: %s\n", meta.Name, desc)
 	}
 	return sb.String()
 }

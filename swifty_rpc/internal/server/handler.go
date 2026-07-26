@@ -33,9 +33,9 @@ import (
 )
 
 var (
-	serverStreamType = reflect.TypeOf((*istream.ServerStream)(nil)).Elem()
-	contextType      = reflect.TypeOf((*context.Context)(nil)).Elem()
-	errorType        = reflect.TypeOf((*error)(nil)).Elem()
+	serverStreamType = reflect.TypeFor[istream.ServerStream]()
+	contextType      = reflect.TypeFor[context.Context]()
+	errorType        = reflect.TypeFor[error]()
 )
 
 type Handler struct {
@@ -153,8 +153,8 @@ func (h *Handler) invoke(ctx context.Context, conn *transport.TCPConnection, req
 	// grpc-go style: (ctx context.Context, req *T) (*R, error)
 	if numIn == 2 && numOut == 2 &&
 		methodType.In(0).Implements(contextType) &&
-		methodType.In(1).Kind() == reflect.Ptr &&
-		methodType.Out(0).Kind() == reflect.Ptr &&
+		methodType.In(1).Kind() == reflect.Pointer &&
+		methodType.Out(0).Kind() == reflect.Pointer &&
 		methodType.Out(1).Implements(errorType) {
 
 		req := reflect.New(methodType.In(1).Elem())
@@ -180,7 +180,7 @@ func (h *Handler) invoke(ctx context.Context, conn *transport.TCPConnection, req
 	if numIn == 2 && numOut == 1 && methodType.Out(0).Implements(errorType) {
 		reqType := methodType.In(0)
 
-		if reqType.Kind() != reflect.Ptr {
+		if reqType.Kind() != reflect.Pointer {
 			return nil, false, fmt.Errorf("unsupported method signature: %s.%s", serviceName, methodName)
 		}
 
@@ -219,18 +219,16 @@ func (h *Handler) invoke(ctx context.Context, conn *transport.TCPConnection, req
 			// this connection. streamWg keeps the connection open until
 			// all streams complete.
 			if streamWg != nil {
-				streamWg.Add(1)
-				go func() {
-					defer streamWg.Done()
+				streamWg.Go(func() {
 					run()
-				}()
+				})
 			} else {
 				run()
 			}
 			return nil, true, nil
 		}
 
-		if secondParam.Kind() == reflect.Ptr {
+		if secondParam.Kind() == reflect.Pointer {
 			reply := reflect.New(secondParam.Elem())
 			results, err := safeCall(method, []reflect.Value{req, reply})
 			if err != nil {

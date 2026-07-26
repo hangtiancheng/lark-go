@@ -123,8 +123,8 @@ func halve(src image.Image) image.Image {
 	sb := src.Bounds()
 	w, h := sb.Dx()/2, sb.Dy()/2
 	dst := image.NewRGBA(image.Rect(0, 0, w, h))
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
+	for y := range h {
+		for x := range w {
 			sx, sy := sb.Min.X+x*2, sb.Min.Y+y*2
 			r1, g1, b1, a1 := src.At(sx, sy).RGBA()
 			r2, g2, b2, a2 := src.At(sx+1, sy).RGBA()
@@ -163,13 +163,13 @@ func validateVideoInputURL(in string) error {
 // decodeDataURI returns the raw bytes from a "data:[mime];base64,..." string.
 // Non-base64 data URIs are rejected since the API only round-trips base64.
 func decodeDataURI(s string) ([]byte, error) {
-	comma := strings.IndexByte(s, ',')
-	if comma < 0 {
+	before, after, ok := strings.Cut(s, ",")
+	if !ok {
 		return nil, errors.New("data URI missing comma separator")
 	}
-	header := s[:comma]
+	header := before
 	if !strings.Contains(header, ";base64") {
 		return nil, errors.New("data URI must be base64-encoded")
 	}
-	return base64.StdEncoding.DecodeString(s[comma+1:])
+	return base64.StdEncoding.DecodeString(after)
 }

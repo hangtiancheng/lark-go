@@ -1055,10 +1055,10 @@ func newAgentHookRunner(client llm.Client) func(prompt string, ctx hooks.HookCon
 		conv := conversation.NewManager()
 		conv.AddUserMessage(p)
 		events, errs := client.Stream(c, conv, nil)
-		var text string
+		var text strings.Builder
 		for ev := range events {
 			if td, ok := ev.(llm.TextDelta); ok {
-				text += td.Text
+				text.WriteString(td.Text)
 			}
 		}
 		select {
@@ -1068,7 +1068,7 @@ func newAgentHookRunner(client llm.Client) func(prompt string, ctx hooks.HookCon
 			}
 		default:
 		}
-		return text, nil
+		return text.String(), nil
 	}
 }
 

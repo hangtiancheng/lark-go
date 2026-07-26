@@ -137,7 +137,7 @@ func expandIncludes(content, baseDir, projectRoot string, seen map[string]bool, 
 					}
 					if data, err := os.ReadFile(abs); err == nil {
 						seen[abs] = true
-						out.WriteString(fmt.Sprintf("<!-- included from %s -->\n", path))
+						fmt.Fprintf(&out, "<!-- included from %s -->\n", path)
 						out.WriteString(expandIncludes(string(data), filepath.Dir(abs), projectRoot, seen, depth+1))
 						out.WriteByte('\n')
 						continue

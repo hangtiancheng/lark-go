@@ -27,7 +27,7 @@ import (
 )
 
 type RoundRobin struct {
-	idx uint64
+	idx atomic.Uint64
 }
 
 func NewRR() *RoundRobin {
@@ -39,6 +39,6 @@ func (r *RoundRobin) Select(list []registry.Instance) registry.Instance {
 	if len(list) == 0 {
 		return registry.Instance{}
 	}
-	i := atomic.AddUint64(&r.idx, 1)
+	i := r.idx.Add(1)
 	return list[(i-1)%uint64(len(list))]
 }

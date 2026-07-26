@@ -93,8 +93,8 @@ func ParseToken(cfg config.Config, token string) (string, bool) {
 }
 
 func BearerToken(header string, queryToken string) string {
-	if strings.HasPrefix(header, "Bearer ") {
-		return strings.TrimPrefix(header, "Bearer ")
+	if after, ok := strings.CutPrefix(header, "Bearer "); ok {
+		return after
 	}
 	return queryToken
 }

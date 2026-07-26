@@ -159,17 +159,17 @@ func (tm *TaskManager) AdoptRunning(name string, eventCh <-chan agent.AgentEvent
 	tm.SetRunning(taskID, cancel)
 
 	go func() {
-		var output string
+		var output strings.Builder
 		for ev := range eventCh {
 			switch e := ev.(type) {
 			case agent.StreamText:
-				output += e.Text
+				output.WriteString(e.Text)
 			case agent.ErrorEvent:
 				tm.SetFailed(taskID, e.Message)
 				return
 			}
 		}
-		tm.SetCompleted(taskID, output)
+		tm.SetCompleted(taskID, output.String())
 	}()
 
 	return taskID
@@ -337,12 +337,12 @@ func SpawnSubAgent(
 		}
 		conv.AddUserMessage(taskPrompt)
 
-		var output string
+		var output strings.Builder
 		ch := subAgent.Run(subCtx, conv)
 		for ev := range ch {
 			switch e := ev.(type) {
 			case agent.StreamText:
-				output += e.Text
+				output.WriteString(e.Text)
 			case agent.PermissionRequestEvent:
 				// Background sub-agents are headless: auto-deny so executeSingleTool doesn't stall on respCh
 				// forever.
@@ -354,7 +354,7 @@ func SpawnSubAgent(
 				// done
 			}
 		}
-		taskMgr.SetCompleted(taskID, output)
+		taskMgr.SetCompleted(taskID, output.String())
 	}()
 
 	return taskID

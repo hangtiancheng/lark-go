@@ -63,7 +63,7 @@ func buildProfile(config Config) string {
 
 	// Allow write per path.
 	for _, path := range config.AllowWrite {
-		sb.WriteString(fmt.Sprintf("(allow file-write* (subpath %q))\n", path))
+		fmt.Fprintf(&sb, "(allow file-write* (subpath %q))\n", path)
 	}
 
 	// Paths to deny write are placed after allow rules; seatbelt applies
@@ -72,9 +72,9 @@ func buildProfile(config Config) string {
 	for _, path := range config.DenyWrite {
 		info, err := os.Stat(path)
 		if err == nil && info.IsDir() {
-			sb.WriteString(fmt.Sprintf("(deny file-write* (subpath %q))\n", path))
+			fmt.Fprintf(&sb, "(deny file-write* (subpath %q))\n", path)
 		} else {
-			sb.WriteString(fmt.Sprintf("(deny file-write* (literal %q))\n", path))
+			fmt.Fprintf(&sb, "(deny file-write* (literal %q))\n", path)
 		}
 	}
 

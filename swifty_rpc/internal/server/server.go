@@ -137,14 +137,12 @@ func (s *Server) Serve(lis net.Listener) error {
 		s.conns[tcpConn] = struct{}{}
 		s.mu.Unlock()
 
-		s.wg.Add(1)
-		go func() {
-			defer s.wg.Done()
+		s.wg.Go(func() {
 			s.Handle(tcpConn)
 			s.mu.Lock()
 			delete(s.conns, tcpConn)
 			s.mu.Unlock()
-		}()
+		})
 	}
 }
 

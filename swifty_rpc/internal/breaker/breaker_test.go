@@ -27,10 +27,10 @@ import (
 
 func TestCircuitBreakerClosedAndOpen(t *testing.T) {
 	cb := NewCircuitBreaker(4, 0.5, 20*time.Millisecond)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		cb.RecordSuccess()
 	}
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		cb.RecordFailure()
 	}
 	if cb.State() != Open {

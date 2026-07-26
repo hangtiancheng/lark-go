@@ -216,7 +216,7 @@ func containsMsg(msgs []conversation.Message, want string) bool {
 func TestAutoCompactKeepsRecentVerbatim(t *testing.T) {
 	conv := conversation.NewManager()
 	// Older prefix: several large messages that should be summarized away.
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		conv.AddUserMessage("OLD-PREFIX " + bigMsg(3000))
 		conv.AddAssistantMessage("OLD-REPLY " + bigMsg(3000))
 	}
@@ -259,7 +259,7 @@ func TestAutoCompactKeepsRecentVerbatim(t *testing.T) {
 // session.FindLastCompactBoundary then rebuilds the compacted state from it.
 func TestAutoCompactPersistsBoundary(t *testing.T) {
 	conv := conversation.NewManager()
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		conv.AddUserMessage("OLD-PREFIX " + bigMsg(3000))
 		conv.AddAssistantMessage("OLD-REPLY " + bigMsg(3000))
 	}
@@ -322,7 +322,7 @@ func TestAutoCompactPersistsBoundary(t *testing.T) {
 // (one-shot callers, tests, sub-agents) — behaviour stays as before.
 func TestAutoCompactNoSessionNoBoundary(t *testing.T) {
 	conv := conversation.NewManager()
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		conv.AddUserMessage("OLD-PREFIX " + bigMsg(3000))
 		conv.AddAssistantMessage("OLD-REPLY " + bigMsg(3000))
 	}
@@ -346,7 +346,7 @@ func TestAutoCompactNoSessionNoBoundary(t *testing.T) {
 // appear in the prompt handed to the summarizer.
 func TestAutoCompactSummaryOnlyCoversPrefix(t *testing.T) {
 	conv := conversation.NewManager()
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		conv.AddUserMessage("PREFIX-ONLY-CONTENT " + bigMsg(3000))
 		conv.AddAssistantMessage("PREFIX-ONLY-REPLY " + bigMsg(3000))
 	}
@@ -374,7 +374,7 @@ func TestAutoCompactSummaryOnlyCoversPrefix(t *testing.T) {
 func TestComputeKeepStartIndexDoesNotSplitToolPair(t *testing.T) {
 	conv := conversation.NewManager()
 	// Large prefix so keepStart > 0.
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		conv.AddUserMessage(bigMsg(3000))
 		conv.AddAssistantMessage(bigMsg(3000))
 	}

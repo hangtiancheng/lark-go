@@ -51,7 +51,7 @@ func TestRandom(t *testing.T) {
 		t.Fatalf("empty select = %+v", got)
 	}
 	list := instances()
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		if got := r.Select(list).Addr; got == "" {
 			t.Fatal("random select returned empty instance")
 		}
@@ -62,7 +62,7 @@ func TestWeightedRR(t *testing.T) {
 	list := instances()
 	w := NewWeightedRR([]int{1, 2, 3})
 	got := make(map[string]int)
-	for i := 0; i < 6; i++ {
+	for range 6 {
 		got[w.Select(list).Addr]++
 	}
 	if got["a"] != 1 || got["b"] != 2 || got["c"] != 3 {
@@ -81,7 +81,7 @@ func TestConcurrentBalancers(t *testing.T) {
 	random := NewRandom()
 	list := instances()
 	var wg sync.WaitGroup
-	for i := 0; i < 32; i++ {
+	for range 32 {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()

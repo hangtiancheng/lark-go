@@ -54,7 +54,7 @@ func IsSafeRefName(name string) bool {
 		return false
 	}
 	// Reject single-dot and empty path components.
-	for _, seg := range strings.Split(name, "/") {
+	for seg := range strings.SplitSeq(name, "/") {
 		if seg == "." || seg == "" {
 			return false
 		}
@@ -150,10 +150,10 @@ func readGitHead(gitDir string) (*gitHead, error) {
 		return nil, err
 	}
 	content := strings.TrimSpace(string(raw))
-	if strings.HasPrefix(content, "ref:") {
-		ref := strings.TrimSpace(strings.TrimPrefix(content, "ref:"))
-		if strings.HasPrefix(ref, "refs/heads/") {
-			name := strings.TrimPrefix(ref, "refs/heads/")
+	if after, ok := strings.CutPrefix(content, "ref:"); ok {
+		ref := strings.TrimSpace(after)
+		if after, ok := strings.CutPrefix(ref, "refs/heads/"); ok {
+			name := after
 			if !IsSafeRefName(name) {
 				return nil, nil
 			}
@@ -206,8 +206,8 @@ func resolveRefInDir(dir, ref string) (string, error) {
 	raw, err := os.ReadFile(filepath.Join(dir, ref))
 	if err == nil {
 		content := strings.TrimSpace(string(raw))
-		if strings.HasPrefix(content, "ref:") {
-			target := strings.TrimSpace(strings.TrimPrefix(content, "ref:"))
+		if after, ok := strings.CutPrefix(content, "ref:"); ok {
+			target := strings.TrimSpace(after)
 			if !IsSafeRefName(target) {
 				return "", nil
 			}
@@ -232,16 +232,16 @@ func resolveRefInDir(dir, ref string) (string, error) {
 		}
 		return "", err
 	}
-	for _, line := range strings.Split(string(packed), "\n") {
+	for line := range strings.SplitSeq(string(packed), "\n") {
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "^") {
 			continue
 		}
-		spaceIdx := strings.IndexByte(line, ' ')
-		if spaceIdx == -1 {
+		before, after, ok := strings.Cut(line, " ")
+		if !ok {
 			continue
 		}
-		if line[spaceIdx+1:] == ref {
-			sha := line[:spaceIdx]
+		if after == ref {
+			sha := before
 			if !IsValidGitSha(sha) {
 				return "", nil
 			}

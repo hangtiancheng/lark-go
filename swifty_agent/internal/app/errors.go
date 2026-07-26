@@ -60,14 +60,14 @@ func structuredErrorMessage(err error) string {
 
 	// Reflect into the concrete error type to pull HTTP diagnostics generically.
 	v := reflect.ValueOf(err)
-	for v.Kind() == reflect.Ptr && !v.IsNil() {
+	for v.Kind() == reflect.Pointer && !v.IsNil() {
 		v = v.Elem()
 	}
 	if v.Kind() == reflect.Struct {
 		if f := v.FieldByName("StatusCode"); f.IsValid() && f.Kind() == reflect.Int {
 			se.StatusCode = int(f.Int())
 		}
-		if f := v.FieldByName("Request"); f.IsValid() && f.Kind() == reflect.Ptr && !f.IsNil() {
+		if f := v.FieldByName("Request"); f.IsValid() && f.Kind() == reflect.Pointer && !f.IsNil() {
 			se.URL = requestURL(f)
 		}
 		// *anthropic.Error exposes RawJSON() returning the cached response body.
@@ -95,12 +95,12 @@ func structuredErrorMessage(err error) string {
 
 // requestURL extracts the URL string from a *http.Request reflect.Value.
 func requestURL(reqVal reflect.Value) string {
-	if reqVal.Kind() != reflect.Ptr || reqVal.IsNil() {
+	if reqVal.Kind() != reflect.Pointer || reqVal.IsNil() {
 		return ""
 	}
 	req := reqVal.Elem()
 	urlField := req.FieldByName("URL")
-	if !urlField.IsValid() || urlField.Kind() != reflect.Ptr || urlField.IsNil() {
+	if !urlField.IsValid() || urlField.Kind() != reflect.Pointer || urlField.IsNil() {
 		return ""
 	}
 	if u, ok := urlField.Interface().(*url.URL); ok && u != nil {

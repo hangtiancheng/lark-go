@@ -23,6 +23,7 @@ package subagent
 import (
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"sort"
@@ -54,9 +55,7 @@ func NewAgentLoader(workDir string) *AgentLoader {
 // locally that's a SWIFTX_VERIFICATION_AGENT env var.
 func getBuiltinSpecs() map[string]SubAgentSpec {
 	result := make(map[string]SubAgentSpec, len(BuiltinSpecs)+1)
-	for name, spec := range BuiltinSpecs {
-		result[name] = spec
-	}
+	maps.Copy(result, BuiltinSpecs)
 	if os.Getenv("SWIFTX_VERIFICATION_AGENT") == "true" {
 		result[VerificationAgentType] = verificationSpec
 	}

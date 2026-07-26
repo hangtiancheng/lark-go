@@ -139,7 +139,7 @@ func TestPrepareInputImage_BadInputs(t *testing.T) {
 func writeTinyPNG(t *testing.T, path string) {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, 4, 4))
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		img.Pix[i*4+0] = uint8(i * 16)
 		img.Pix[i*4+1] = 128
 		img.Pix[i*4+2] = 200
@@ -159,8 +159,8 @@ func writeRandomPNG(t *testing.T, path string, w, h int) {
 	t.Helper()
 	rng := rand.New(rand.NewSource(1))
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	for y := 0; y < h; y++ {
-		for x := 0; x < w; x++ {
+	for y := range h {
+		for x := range w {
 			img.SetRGBA(x, y, color.RGBA{
 				R: uint8(rng.Intn(256)),
 				G: uint8(rng.Intn(256)),

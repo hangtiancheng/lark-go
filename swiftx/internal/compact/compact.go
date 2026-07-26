@@ -488,16 +488,16 @@ func truncateHeadForPTL(prefix []conversation.Message, tokenGap int) []conversat
 func buildPrefixText(prefix []conversation.Message) string {
 	var sb strings.Builder
 	for _, m := range prefix {
-		sb.WriteString(fmt.Sprintf("[%s]: %s\n", m.Role, m.Content))
+		fmt.Fprintf(&sb, "[%s]: %s\n", m.Role, m.Content)
 		for _, tu := range m.ToolUses {
-			sb.WriteString(fmt.Sprintf("[tool_use %s]: %s\n", tu.ToolName, tu.ToolUseID))
+			fmt.Fprintf(&sb, "[tool_use %s]: %s\n", tu.ToolName, tu.ToolUseID)
 		}
 		for _, tr := range m.ToolResults {
 			content := tr.Content
 			if len(content) > 500 {
 				content = content[:500] + "..."
 			}
-			sb.WriteString(fmt.Sprintf("[tool_result]: %s\n", content))
+			fmt.Fprintf(&sb, "[tool_result]: %s\n", content)
 		}
 	}
 	return sb.String()
@@ -630,10 +630,10 @@ func callSummaryWithPTLRetry(
 // returning only the contents of the <summary> block. Falls back to the raw text when neither tag
 // is present (model disobeyed the prompt structure) so we never lose the summary altogether.
 func formatCompactSummary(raw string) string {
-	if start := strings.Index(raw, "<summary>"); start >= 0 {
-		body := raw[start+len("<summary>"):]
-		if end := strings.Index(body, "</summary>"); end >= 0 {
-			return strings.TrimSpace(body[:end])
+	if _, after, ok := strings.Cut(raw, "<summary>"); ok {
+		body := after
+		if before, _, ok := strings.Cut(body, "</summary>"); ok {
+			return strings.TrimSpace(before)
 		}
 		return strings.TrimSpace(body)
 	}

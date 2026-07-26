@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"sync"
 )
@@ -213,13 +214,7 @@ func (s *SharedTaskStore) InitEmpty() {
 // the new slice.
 func appendUnique(base, add []string) []string {
 	for _, v := range add {
-		found := false
-		for _, e := range base {
-			if e == v {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(base, v)
 		if !found {
 			base = append(base, v)
 		}

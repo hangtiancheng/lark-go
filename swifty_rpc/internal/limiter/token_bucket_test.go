@@ -57,12 +57,10 @@ func TestTokenBucketZeroAndNegative(t *testing.T) {
 func TestTokenBucketConcurrentAllowAndStop(t *testing.T) {
 	tb := NewTokenBucket(100)
 	var wg sync.WaitGroup
-	for i := 0; i < 32; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 32 {
+		wg.Go(func() {
 			_ = tb.Allow()
-		}()
+		})
 	}
 	wg.Wait()
 	tb.Stop()

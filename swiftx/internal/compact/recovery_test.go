@@ -66,7 +66,7 @@ func TestRecoveryFileLimitAndOrder(t *testing.T) {
 	s := NewRecoveryState()
 	// Record 7 files spread in time so newest-first ordering is observable.
 	base := time.Now().Add(-time.Hour)
-	for i := 0; i < 7; i++ {
+	for i := range 7 {
 		path := "/f" + string(rune('0'+i))
 		s.RecordFileRead(path, "x")
 		// Force-set timestamps so ordering is deterministic.
@@ -103,7 +103,7 @@ func TestRecoverySkillsBudget(t *testing.T) {
 	bodyChars := int(float64(RecoveryTokensPerSkill) * recoveryCharsPerToken)
 	body := strings.Repeat("y", bodyChars)
 	base := time.Now()
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		name := "skill-" + string(rune('0'+i))
 		s.RecordSkillInvocation(name, body)
 		rec := s.skills[name]

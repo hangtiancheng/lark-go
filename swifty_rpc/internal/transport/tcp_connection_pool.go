@@ -24,7 +24,6 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"sync/atomic"
 )
 
 var ErrPoolClosed = errors.New("connection pool closed")
@@ -77,7 +76,7 @@ func (p *ConnectionPool) Acquire(ctx context.Context) (*TCPClient, error) {
 		idx := (p.next + i) % len(p.conns)
 		conn := p.conns[idx]
 
-		if atomic.LoadInt32(&conn.closed) == 0 {
+		if conn.closed.Load() == 0 {
 			p.next = (idx + 1) % len(p.conns)
 			return conn, nil
 		}

@@ -231,7 +231,7 @@ func TestWebSocketHeartbeat(t *testing.T) {
 	_ = ws.conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
 
 	pingCount := 0
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		opcode, _, err := readServerFrame(ws.br)
 		if err != nil {
 			break
@@ -371,14 +371,14 @@ func readServerFrame(br *bufio.Reader) (int, []byte, error) {
 	opcode := int(h[0] & 0x0F)
 	length := uint64(h[1] & 0x7F)
 
-	switch {
-	case length == 126:
+	switch length {
+	case 126:
 		ext := make([]byte, 2)
 		if _, err := io.ReadFull(br, ext); err != nil {
 			return 0, nil, err
 		}
 		length = uint64(binary.BigEndian.Uint16(ext))
-	case length == 127:
+	case 127:
 		ext := make([]byte, 8)
 		if _, err := io.ReadFull(br, ext); err != nil {
 			return 0, nil, err

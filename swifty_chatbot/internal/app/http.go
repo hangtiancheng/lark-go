@@ -27,6 +27,7 @@ import (
 	"hash/crc32"
 	"io"
 	"log"
+	"maps"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -397,9 +398,7 @@ func writeCode(ctx *swifty_http.Context, result code.Code) {
 
 func writeSuccess(ctx *swifty_http.Context, extra swifty_http.H) {
 	body := codeBody(code.OK)
-	for key, value := range extra {
-		body[key] = value
-	}
+	maps.Copy(body, extra)
 	ctx.Status = http.StatusOK
 	ctx.JSON(body)
 }

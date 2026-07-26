@@ -30,7 +30,8 @@ func newTestStore(t *testing.T) *SharedTaskStore {
 	return NewSharedTaskStore(filepath.Join(t.TempDir(), "tasks.json"))
 }
 
-func strptr(s string) *string { return &s }
+//go:fix inline
+func strptr(s string) *string { return new(s) }
 
 func TestSharedTaskCreateAssignsStringIDsAndPending(t *testing.T) {
 	store := newTestStore(t)
@@ -52,7 +53,7 @@ func TestSharedTaskGetAndList(t *testing.T) {
 	store := newTestStore(t)
 	store.Create("a", "", "alice", nil, nil, "")
 	b := store.Create("b", "", "bob", nil, nil, "")
-	store.Update(b.ID, TaskUpdate{Status: strptr("completed")})
+	store.Update(b.ID, TaskUpdate{Status: new("completed")})
 
 	if store.Get("999") != nil {
 		t.Fatalf("get missing should be nil")
@@ -75,9 +76,9 @@ func TestSharedTaskUpdateAndDeps(t *testing.T) {
 	store := newTestStore(t)
 	task := store.Create("task", "", "", nil, nil, "")
 	updated := store.Update(task.ID, TaskUpdate{
-		Status:       strptr("in_progress"),
-		Assignee:     strptr("carol"),
-		Description:  strptr("new desc"),
+		Status:       new("in_progress"),
+		Assignee:     new("carol"),
+		Description:  new("new desc"),
 		AddBlocks:    []string{"2"},
 		AddBlockedBy: []string{"3"},
 	})
@@ -92,7 +93,7 @@ func TestSharedTaskUpdateAndDeps(t *testing.T) {
 	if len(again.Blocks) != 1 {
 		t.Fatalf("dedup failed: %+v", again.Blocks)
 	}
-	if store.Update("nope", TaskUpdate{Status: strptr("completed")}) != nil {
+	if store.Update("nope", TaskUpdate{Status: new("completed")}) != nil {
 		t.Fatalf("update missing should be nil")
 	}
 }

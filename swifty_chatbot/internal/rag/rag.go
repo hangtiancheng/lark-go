@@ -102,12 +102,9 @@ func (s *Store) SimilaritySearch(ctx context.Context, query string, numDocuments
 	sort.Slice(scores, func(i, j int) bool {
 		return scores[i].score > scores[j].score
 	})
-	k := numDocuments
-	if k > len(scores) {
-		k = len(scores)
-	}
+	k := min(numDocuments, len(scores))
 	results := make([]schema.Document, k)
-	for i := 0; i < k; i++ {
+	for i := range k {
 		d := s.docs[scores[i].idx]
 		d.Score = float32(scores[i].score)
 		results[i] = d

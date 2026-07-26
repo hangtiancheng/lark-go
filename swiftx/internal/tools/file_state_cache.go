@@ -21,7 +21,6 @@
 package tools
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -58,7 +57,7 @@ func (c *FileStateCache) Check(filePath string) (bool, string) {
 	c.mu.Unlock()
 
 	if !exists {
-		return false, fmt.Sprintf("Error: file has not been read yet. Read it first before editing.")
+		return false, "Error: file has not been read yet. Read it first before editing."
 	}
 
 	info, err := os.Stat(abs)
@@ -68,7 +67,7 @@ func (c *FileStateCache) Check(filePath string) (bool, string) {
 	}
 	currentMtime := info.ModTime().UnixMilli()
 	if currentMtime > cachedMtime {
-		return false, fmt.Sprintf("Error: file has been modified since last read. Read it again before editing.")
+		return false, "Error: file has been modified since last read. Read it again before editing."
 	}
 
 	return true, ""

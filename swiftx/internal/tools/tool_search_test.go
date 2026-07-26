@@ -289,7 +289,7 @@ func TestDeferredTokenSavings(t *testing.T) {
 	reg.Register(&mockNormalTool{name: "WriteFile"})
 
 	// Register 50 deferred tools with realistic large schemas.
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		reg.Register(&mockLargeDeferredTool{
 			name: fmt.Sprintf("mcp__grafana__tool_%03d", i),
 			desc: fmt.Sprintf("A realistic MCP tool that queries datasource %d with full parameter set", i),
@@ -305,7 +305,7 @@ func TestDeferredTokenSavings(t *testing.T) {
 	sizeDeferred := len(bytesDeferred)
 
 	// Discover all 50 deferred tools.
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		reg.MarkDiscovered(fmt.Sprintf("mcp__grafana__tool_%03d", i))
 	}
 

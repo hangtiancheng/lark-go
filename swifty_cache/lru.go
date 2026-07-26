@@ -284,7 +284,7 @@ func init() {
 	go func() {
 		for {
 			atomic.StoreInt64(&clock, time.Now().UnixNano())
-			for i := 0; i < 9; i++ {
+			for range 9 {
 				time.Sleep(100 * time.Millisecond)
 				atomic.AddInt64(&clock, int64(100*time.Millisecond))
 			}

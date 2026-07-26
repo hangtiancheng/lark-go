@@ -38,7 +38,7 @@ func trace(message string) string {
 	frames := runtime.CallersFrames(pcs[:n])
 	for {
 		frame, more := frames.Next()
-		str.WriteString(fmt.Sprintf("\n\t%s:%d", frame.File, frame.Line))
+		fmt.Fprintf(&str, "\n\t%s:%d", frame.File, frame.Line)
 		if !more {
 			break
 		}

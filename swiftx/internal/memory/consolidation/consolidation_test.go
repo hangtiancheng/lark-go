@@ -290,7 +290,7 @@ func TestMaybeRun_TriggersWhenBothGatesMet(t *testing.T) {
 	os.MkdirAll(sessDir, 0o755)
 
 	// Create 6 sessions
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		name := filepath.Join(sessDir, "s"+strconv.Itoa(i)+".jsonl")
 		os.WriteFile(name, []byte(`{"role":"user","content":"x","ts":1}`+"\n"), 0o644)
 	}
@@ -379,7 +379,7 @@ func TestMaybeRun_LockBlocks(t *testing.T) {
 	os.MkdirAll(memDir, 0o755)
 	os.MkdirAll(sessDir, 0o755)
 
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		name := filepath.Join(sessDir, "s"+strconv.Itoa(i)+".jsonl")
 		os.WriteFile(name, []byte(`{"role":"user","content":"x","ts":1}`+"\n"), 0o644)
 	}

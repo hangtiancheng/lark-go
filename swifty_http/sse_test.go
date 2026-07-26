@@ -21,7 +21,6 @@
 package swifty_http
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -180,19 +179,16 @@ func TestSSEHeartbeatConcurrency(t *testing.T) {
 		defer stop()
 
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := 0; i < 10; i++ {
+		wg.Go(func() {
+			for range 10 {
 				sse.Data("msg")
 				time.Sleep(3 * time.Millisecond)
 			}
-		}()
+		})
 		wg.Wait()
 	})
 
-	c, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	c := t.Context()
 	req := httptest.NewRequest(http.MethodGet, "/heartbeat", nil).WithContext(c)
 	rec := httptest.NewRecorder()
 	app.ServeHTTP(rec, req)

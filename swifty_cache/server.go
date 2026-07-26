@@ -25,7 +25,6 @@ import (
 	"fmt"
 	"net"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"log"
@@ -158,7 +157,7 @@ func (s *Server) Get(ctx context.Context, req *pb.Request) (*pb.ResponseForGet, 
 	if group == nil {
 		return nil, fmt.Errorf("group %s not found", req.Group)
 	}
-	atomic.AddInt64(&group.stats.serverRequests, 1)
+	group.stats.serverRequests.Add(1)
 
 	view, err := group.Get(withPeerRequest(ctx), req.Key)
 	if err != nil {

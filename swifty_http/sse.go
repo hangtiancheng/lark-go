@@ -95,7 +95,7 @@ func (w *SSEWriter) Retry(ms int) {
 
 func (w *SSEWriter) Comment(text string) {
 	w.mu.Lock()
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		fmt.Fprintf(w.ctx.Writer, ": %s\n", line)
 	}
 	fmt.Fprint(w.ctx.Writer, "\n")
@@ -158,8 +158,8 @@ func (w *SSEWriter) Done() {
 }
 
 func (w *SSEWriter) writeData(data string) {
-	lines := strings.Split(data, "\n")
-	for _, line := range lines {
+	lines := strings.SplitSeq(data, "\n")
+	for line := range lines {
 		fmt.Fprintf(w.ctx.Writer, "data: %s\n", line)
 	}
 	fmt.Fprint(w.ctx.Writer, "\n")

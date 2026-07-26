@@ -59,10 +59,8 @@ func TestDoSuppressesDuplicateCalls(t *testing.T) {
 	const callers = 16
 	var wg sync.WaitGroup
 	errs := make(chan error, callers)
-	for i := 0; i < callers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range callers {
+		wg.Go(func() {
 			value, err := g.Do("key", func() (any, error) {
 				mu.Lock()
 				calls++
@@ -80,7 +78,7 @@ func TestDoSuppressesDuplicateCalls(t *testing.T) {
 			if value != "value" {
 				errs <- errors.New("unexpected value")
 			}
-		}()
+		})
 	}
 	<-ready
 	time.Sleep(20 * time.Millisecond)

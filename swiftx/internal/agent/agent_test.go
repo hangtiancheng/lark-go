@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -153,7 +154,7 @@ func getToolResults(events []AgentEvent) []ToolResultEvent {
 func buildSkillSystemPrompt(skillsDir string, catalog *skills.Catalog) string {
 	var sb strings.Builder
 	sb.WriteString("## Available Skills\n\n")
-	sb.WriteString(fmt.Sprintf("Skills are installed at: %s\n", skillsDir))
+	fmt.Fprintf(&sb, "Skills are installed at: %s\n", skillsDir)
 	sb.WriteString("When creating new skills, always place them under this directory as <skill-name>/SKILL.md.\n\n")
 	sb.WriteString("The following skills are available. When the user invokes /<name>, follow that skill's instructions.\n\n")
 	for _, meta := range catalog.List() {
@@ -161,7 +162,7 @@ func buildSkillSystemPrompt(skillsDir string, catalog *skills.Catalog) string {
 		if len(desc) > 200 {
 			desc = desc[:200] + "…"
 		}
-		sb.WriteString(fmt.Sprintf("- /%s: %s\n", meta.Name, desc))
+		fmt.Fprintf(&sb, "- /%s: %s\n", meta.Name, desc)
 	}
 	env := prompt.DetectEnvironment(".")
 	return prompt.BuildSystemPrompt(env, prompt.BuildOptions{SkillSection: sb.String()})
@@ -914,13 +915,6 @@ func TestRealSkillsLoadAndRunSimulation(t *testing.T) {
 	}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 func TestAgentOnLoopCompleteFiresOnFinalTurn(t *testing.T) {
 	client := &mockClient{responses: [][]llm.StreamEvent{{
 		llm.TextDelta{Text: "done"},
@@ -1015,10 +1009,5 @@ func schemaNames(schemas []map[string]any) []string {
 }
 
 func contains(list []string, want string) bool {
-	for _, v := range list {
-		if v == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(list, want)
 }

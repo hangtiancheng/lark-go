@@ -231,7 +231,7 @@ func truncateByTokens(s string, tokenBudget int) string {
 // firstLine returns the first non-empty line of s, trimmed. Used to keep
 // the tool listing compact when descriptions are multi-paragraph.
 func firstLine(s string) string {
-	for _, line := range strings.Split(s, "\n") {
+	for line := range strings.SplitSeq(s, "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed != "" {
 			return trimmed

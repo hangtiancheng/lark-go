@@ -113,24 +113,25 @@ func (t *AgentTool) Name() string                 { return "Agent" }
 func (t *AgentTool) Category() tools.ToolCategory { return tools.CategoryCommand }
 
 func (t *AgentTool) Description() string {
-	desc := `Launch a sub-agent to handle a complex task. Each sub-agent runs independently with its own context. The sub-agent cannot see the current conversation.
+	var desc strings.Builder
+	desc.WriteString(`Launch a sub-agent to handle a complex task. Each sub-agent runs independently with its own context. The sub-agent cannot see the current conversation.
 
 This is ONE tool with multiple roles. Roles are NOT separate tools — you pick one by passing its name in the "subagent_type" parameter. Do not search for a tool named after a role; call THIS tool ("Agent") and set "subagent_type".
 
-Available roles for the "subagent_type" parameter:`
+Available roles for the "subagent_type" parameter:`)
 
 	if t.Loader != nil {
 		for _, name := range t.Loader.ListNames() {
 			def := t.Loader.Get(name)
-			desc += "\n- " + name + ": " + def.WhenToUse
+			desc.WriteString("\n- " + name + ": " + def.WhenToUse)
 		}
 	} else {
-		desc += "\n- general-purpose: Full tool access for multi-step tasks (default)"
-		desc += "\n- plan: Read-only tools for designing implementation plans"
-		desc += "\n- explore: Read-only search agent for locating code"
+		desc.WriteString("\n- general-purpose: Full tool access for multi-step tasks (default)")
+		desc.WriteString("\n- plan: Read-only tools for designing implementation plans")
+		desc.WriteString("\n- explore: Read-only search agent for locating code")
 	}
 
-	desc += `
+	desc.WriteString(`
 
 Example call shape:
 {
@@ -143,8 +144,8 @@ Example call shape:
 }
 
 Write a detailed prompt explaining what the sub-agent should do and why — it has no prior context.
-When tasks are independent, launch multiple sub-agents in parallel by making multiple Agent tool calls in a single response.`
-	return desc
+When tasks are independent, launch multiple sub-agents in parallel by making multiple Agent tool calls in a single response.`)
+	return desc.String()
 }
 
 func (t *AgentTool) Schema() map[string]any {
@@ -472,12 +473,12 @@ func (t *AgentTool) runFork(ctx context.Context, description, prompt, modelOverr
 	t.TaskMgr.SetRunning(taskID, cancel)
 
 	go func() {
-		var output string
+		var output strings.Builder
 		ch := subAgent.Run(forkCtx, forkedConv)
 		for ev := range ch {
 			switch e := ev.(type) {
 			case agent.StreamText:
-				output += e.Text
+				output.WriteString(e.Text)
 			case agent.PermissionRequestEvent:
 				// Headless: auto-deny so the fork doesn't stall on respCh.
 				e.ResponseCh <- agent.PermDeny
@@ -486,7 +487,7 @@ func (t *AgentTool) runFork(ctx context.Context, description, prompt, modelOverr
 				return
 			}
 		}
-		t.TaskMgr.SetCompleted(taskID, output)
+		t.TaskMgr.SetCompleted(taskID, output.String())
 	}()
 
 	return tools.ToolResult{

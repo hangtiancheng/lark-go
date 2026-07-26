@@ -190,12 +190,12 @@ func CreateDefaultRegistry() *Registry {
 					return fmt.Sprintf("Unknown command: %s", ctx.Args)
 				}
 				var sb strings.Builder
-				sb.WriteString(fmt.Sprintf("/%s — %s\n", cmd.Name, cmd.Description))
+				fmt.Fprintf(&sb, "/%s — %s\n", cmd.Name, cmd.Description)
 				if len(cmd.Aliases) > 0 {
-					sb.WriteString(fmt.Sprintf("  Aliases: %s\n", strings.Join(cmd.Aliases, ", ")))
+					fmt.Fprintf(&sb, "  Aliases: %s\n", strings.Join(cmd.Aliases, ", "))
 				}
 				if cmd.ArgPrompt != "" {
-					sb.WriteString(fmt.Sprintf("  Usage: %s\n", cmd.ArgPrompt))
+					fmt.Fprintf(&sb, "  Usage: %s\n", cmd.ArgPrompt)
 				}
 				return sb.String()
 			}
@@ -206,7 +206,7 @@ func CreateDefaultRegistry() *Registry {
 				if len(cmd.Aliases) > 0 {
 					aliases = ", /" + strings.Join(cmd.Aliases, ", /")
 				}
-				sb.WriteString(fmt.Sprintf("  /%s%s\n    %s\n", cmd.Name, aliases, cmd.Description))
+				fmt.Fprintf(&sb, "  /%s%s\n    %s\n", cmd.Name, aliases, cmd.Description)
 			}
 			sb.WriteString("\nType /help <command> for details.")
 			return sb.String()
@@ -251,14 +251,14 @@ func CreateDefaultRegistry() *Registry {
 			var sb strings.Builder
 			sb.WriteString("Swiftx Status\n")
 			sb.WriteString("──────────────\n")
-			sb.WriteString(fmt.Sprintf("  Mode:      %s\n", ctx.PermissionMode()))
+			fmt.Fprintf(&sb, "  Mode:      %s\n", ctx.PermissionMode())
 			input, output := ctx.TokenCount()
-			sb.WriteString(fmt.Sprintf("  Tokens:    %d in / %d out\n", input, output))
-			sb.WriteString(fmt.Sprintf("  Tools:     %d enabled\n", ctx.ToolCount()))
+			fmt.Fprintf(&sb, "  Tokens:    %d in / %d out\n", input, output)
+			fmt.Fprintf(&sb, "  Tools:     %d enabled\n", ctx.ToolCount())
 			memories := ctx.MemoryList()
-			sb.WriteString(fmt.Sprintf("  Memories:  %d entries\n", len(memories)))
-			sb.WriteString(fmt.Sprintf("  Model:     %s\n", ctx.Model))
-			sb.WriteString(fmt.Sprintf("  Directory: %s\n", ctx.WorkDir))
+			fmt.Fprintf(&sb, "  Memories:  %d entries\n", len(memories))
+			fmt.Fprintf(&sb, "  Model:     %s\n", ctx.Model)
+			fmt.Fprintf(&sb, "  Directory: %s\n", ctx.WorkDir)
 			return sb.String()
 		},
 	})
@@ -277,13 +277,13 @@ func CreateDefaultRegistry() *Registry {
 					return "No memories stored yet."
 				}
 				var sb strings.Builder
-				sb.WriteString(fmt.Sprintf("Memories (%d entries):\n\n", len(memories)))
+				fmt.Fprintf(&sb, "Memories (%d entries):\n\n", len(memories))
 				for i, mem := range memories {
 					preview := mem
 					if len(preview) > 80 {
 						preview = preview[:80] + "…"
 					}
-					sb.WriteString(fmt.Sprintf("  %d. %s\n", i+1, preview))
+					fmt.Fprintf(&sb, "  %d. %s\n", i+1, preview)
 				}
 				return sb.String()
 
@@ -379,13 +379,13 @@ func CreateDefaultRegistry() *Registry {
 				return "No skills installed.\n\nAdd skills to .swiftx/skills/<skill-name>/SKILL.md"
 			}
 			var sb strings.Builder
-			sb.WriteString(fmt.Sprintf("Available skills (%d):\n\n", len(skills)))
+			fmt.Fprintf(&sb, "Available skills (%d):\n\n", len(skills))
 			for _, s := range skills {
 				desc := s.Description
 				if len(desc) > 100 {
 					desc = desc[:100] + "…"
 				}
-				sb.WriteString(fmt.Sprintf("  /%s\n    %s\n\n", s.Name, desc))
+				fmt.Fprintf(&sb, "  /%s\n    %s\n\n", s.Name, desc)
 			}
 			sb.WriteString("Type /<skill-name> to invoke a skill.\n")
 			sb.WriteString("Type /skills reload to hot-reload skills from disk.")

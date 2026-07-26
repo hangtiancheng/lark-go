@@ -144,7 +144,7 @@ func makeRealisticTools(n int) []*realisticMCPTool {
 	}
 
 	tools := make([]*realisticMCPTool, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		tmpl := templates[i%len(templates)]
 		tools[i] = &realisticMCPTool{
 			name:   fmt.Sprintf("%s_%03d", tmpl.namePrefix, i),

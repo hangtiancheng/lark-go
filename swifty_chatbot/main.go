@@ -106,7 +106,7 @@ func main() {
 
 func dialRPC(addr string) (*rpc.ClientConn, error) {
 	var lastErr error
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		cc, err := rpc.Dial(addr, rpc.WithTimeout(30*time.Second))
 		if err == nil {
 			return cc, nil

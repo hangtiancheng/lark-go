@@ -63,7 +63,7 @@ func TestGroupGetCachesLocalValues(t *testing.T) {
 	}))
 	defer group.Close()
 
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		view, err := group.Get(ctx, "key")
 		if err != nil {
 			t.Fatalf("Get returned error: %v", err)
@@ -293,10 +293,8 @@ func TestGroupSuppressesConcurrentLoads(t *testing.T) {
 	const callers = 16
 	var wg sync.WaitGroup
 	errs := make(chan error, callers)
-	for i := 0; i < callers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range callers {
+		wg.Go(func() {
 			view, err := group.Get(ctx, "key")
 			if err != nil {
 				errs <- err
@@ -305,7 +303,7 @@ func TestGroupSuppressesConcurrentLoads(t *testing.T) {
 			if view.String() != "value" {
 				errs <- fmt.Errorf("unexpected value %q", view.String())
 			}
-		}()
+		})
 	}
 	<-ready
 	time.Sleep(20 * time.Millisecond)

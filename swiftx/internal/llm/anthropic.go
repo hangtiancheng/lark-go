@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -134,7 +135,7 @@ func (c *anthropicClient) Stream(ctx context.Context, conv *conversation.Manager
 	var sdkTools []anthropic.ToolUnionParam
 	for _, s := range toolSchemas {
 		inputSchema, _ := s["input_schema"].(map[string]any)
-		props, _ := inputSchema["properties"]
+		props := inputSchema["properties"]
 		required, _ := inputSchema["required"].([]string)
 		desc, _ := s["description"].(string)
 		sdkTools = append(sdkTools, anthropic.ToolUnionParam{
@@ -344,11 +345,11 @@ func (c *anthropicClient) Stream(ctx context.Context, conv *conversation.Manager
 // Mutates `messages` in place. No-op if there's no user message or the
 // final user message has no content blocks we can mark.
 func markLastUserTailForCache(messages []anthropic.MessageParam) {
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role != anthropic.MessageParamRoleUser {
+	for _, v := range slices.Backward(messages) {
+		if v.Role != anthropic.MessageParamRoleUser {
 			continue
 		}
-		blocks := messages[i].Content
+		blocks := v.Content
 		if len(blocks) == 0 {
 			return
 		}

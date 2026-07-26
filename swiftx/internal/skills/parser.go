@@ -141,7 +141,7 @@ func applyMetaDefaults(meta *SkillMeta, dirOrName, body string) {
 		meta.Name = strings.ToLower(strings.ReplaceAll(base, " ", "-"))
 	}
 	if meta.Description == "" && body != "" {
-		for _, line := range strings.Split(body, "\n") {
+		for line := range strings.SplitSeq(body, "\n") {
 			line = strings.TrimSpace(line)
 			if line != "" && !strings.HasPrefix(line, "#") && !strings.HasPrefix(line, "---") {
 				meta.Description = line

@@ -203,13 +203,13 @@ func parseFrontmatter(content string) MemoryFile {
 	if m == nil {
 		return mf
 	}
-	for _, line := range strings.Split(m[1], "\n") {
-		colon := strings.IndexByte(line, ':')
-		if colon < 0 {
+	for line := range strings.SplitSeq(m[1], "\n") {
+		before, after, ok := strings.Cut(line, ":")
+		if !ok {
 			continue
 		}
-		key := strings.TrimSpace(line[:colon])
-		val := strings.TrimSpace(line[colon+1:])
+		key := strings.TrimSpace(before)
+		val := strings.TrimSpace(after)
 		val = strings.Trim(val, `"'`)
 		switch key {
 		case "name":
