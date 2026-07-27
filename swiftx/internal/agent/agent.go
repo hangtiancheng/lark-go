@@ -183,7 +183,6 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 		conv.InjectLongTermMemory(a.Instructions, a.MemoryContent)
 
 		var totalInput, totalOutput int
-		consecutiveUnknown := 0
 		maxTokensEscalated := false
 		outputRecoveries := 0
 
@@ -401,12 +400,6 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 
 			var toolResults []conversation.ToolResultBlock
 			for _, r := range results {
-				if r.isUnknown {
-					consecutiveUnknown++
-				} else {
-					consecutiveUnknown = 0
-				}
-
 				ch <- ToolResultEvent{
 					ToolID:   r.toolID,
 					ToolName: r.toolName,
@@ -434,11 +427,6 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 			// per-item threshold cannot prevent the combined total from exceeding the limit.
 			// Process the entire batch before it enters history so the message is born final.
 			tool_result.ApplyBudget(toolResults, exempt, a.WorkDir, a.SessionID)
-
-			if consecutiveUnknown >= 3 {
-				ch <- ErrorEvent{Message: "Too many consecutive unknown tool calls"}
-				return
-			}
 
 			exitPlanCalled := false
 			for _, tc := range toolCalls {
@@ -551,7 +539,6 @@ type toolExecResult struct {
 	output    string
 	isError   bool
 	elapsed   time.Duration
-	isUnknown bool
 }
 
 // extractFilePath pulls a representative path from common tool argument keys so hooks can do path-
@@ -569,6 +556,7 @@ func (a *Agent) executeSingleTool(ctx context.Context, eventCh chan AgentEvent, 
 	tool := a.Registry.Get(tc.toolName)
 	start := time.Now()
 
+  // On invalid tool name, return a single error and let the model self-correct with another tool; keep the loop running.
 	if tool == nil {
 		return toolExecResult{
 			toolID:    tc.toolID,
@@ -576,7 +564,6 @@ func (a *Agent) executeSingleTool(ctx context.Context, eventCh chan AgentEvent, 
 			output:    fmt.Sprintf("Error: unknown tool '%s'", tc.toolName),
 			isError:   true,
 			elapsed:   time.Since(start),
-			isUnknown: true,
 		}
 	}
 
@@ -626,13 +613,13 @@ func (a *Agent) executeSingleTool(ctx context.Context, eventCh chan AgentEvent, 
 	}
 
 	if a.Hooks != nil {
-		hctx := hooks.HookContext{
+		hookCtx := hooks.HookContext{
 			EventName: hooks.EventPreToolUse,
 			ToolName:  tc.toolName,
 			ToolArgs:  tc.arguments,
 			FilePath:  extractFilePath(tc.arguments),
 		}
-		if rejected, msg := a.Hooks.RunPreToolHooks(hctx); rejected {
+		if rejected, msg := a.Hooks.RunPreToolHooks(hookCtx); rejected {
 			return toolExecResult{
 				toolID:   tc.toolID,
 				toolName: tc.toolName,
