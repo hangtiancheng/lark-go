@@ -247,7 +247,19 @@ type Model struct {
 	resumeSearch    string
 	resumeScrollTop int
 
-	hasExitedPlanMode bool // Records whether Plan Mode was exited during this session, used to inject a reminder on re-entry
+	hasExitedPlanMode bool   // Records whether Plan Mode was exited during this session, used to inject a reminder on re-entry
+	PermissionMode    string // Initial permission mode from the config file; invalid or empty values fall back to default
+}
+
+// asPermissionMode resolves the configured permission mode, falling back
+// to ModeDefault when the value is empty or not a recognized mode.
+func (m *Model) asPermissionMode() permissions.PermissionMode {
+	switch mode := permissions.PermissionMode(m.PermissionMode); mode {
+	case permissions.ModeDefault, permissions.ModeAcceptEdits, permissions.ModePlan, permissions.ModeBypass:
+		return mode
+	default:
+		return permissions.ModeDefault
+	}
 }
 
 func New(providers []config.ProviderConfig, mcpConfigs []config.MCPServerConfig, hookConfigs []hooks.Hook, sandboxCfg ...config.SandboxConfig) Model {
@@ -452,7 +464,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			&permissions.RuleEngine{
 				LocalPath: filepath.Join(wd, ".swiftx", "permissions.local.yaml"),
 			},
-			permissions.ModeDefault,
+			m.asPermissionMode(),
 		)
 		// Initialize the OS-level sandbox based on the config file
 		if m.sandboxCfg.Enabled {
@@ -1280,7 +1292,7 @@ func (m Model) handleProviderSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			&permissions.RuleEngine{
 				LocalPath: filepath.Join(wd, ".swiftx", "permissions.local.yaml"),
 			},
-			permissions.ModeDefault,
+			m.asPermissionMode(),
 		)
 		// Initialize the OS-level sandbox based on the config file
 		if m.sandboxCfg.Enabled {

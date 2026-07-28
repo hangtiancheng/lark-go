@@ -198,7 +198,10 @@ raw
 
 !swifty_cli/internal/remote/fe/dist
 swifty_agent/config.json
-.swifty/
 
-.qoder
-**/.qoder
+.swiftx/
+**/.swiftx/
+!swiftx/.swiftx/config.yaml
+
+.swifty/
+**/.swifty/

@@ -534,11 +534,11 @@ func parseRetryAfter(header string) time.Duration {
 }
 
 type toolExecResult struct {
-	toolID    string
-	toolName  string
-	output    string
-	isError   bool
-	elapsed   time.Duration
+	toolID   string
+	toolName string
+	output   string
+	isError  bool
+	elapsed  time.Duration
 }
 
 // extractFilePath pulls a representative path from common tool argument keys so hooks can do path-
@@ -556,14 +556,14 @@ func (a *Agent) executeSingleTool(ctx context.Context, eventCh chan AgentEvent, 
 	tool := a.Registry.Get(tc.toolName)
 	start := time.Now()
 
-  // On invalid tool name, return a single error and let the model self-correct with another tool; keep the loop running.
+	// On invalid tool name, return a single error and let the model self-correct with another tool; keep the loop running.
 	if tool == nil {
 		return toolExecResult{
-			toolID:    tc.toolID,
-			toolName:  tc.toolName,
-			output:    fmt.Sprintf("Error: unknown tool '%s'", tc.toolName),
-			isError:   true,
-			elapsed:   time.Since(start),
+			toolID:   tc.toolID,
+			toolName: tc.toolName,
+			output:   fmt.Sprintf("Error: unknown tool '%s'", tc.toolName),
+			isError:  true,
+			elapsed:  time.Since(start),
 		}
 	}
 

@@ -98,6 +98,8 @@ func main() {
 	m := tui.New(cfg.Providers, cfg.MCPServers, validHooks, cfg.Sandbox)
 	m.EnableCoordinatorMode = cfg.EnableCoordinatorMode
 	m.ForkDisabled = !cfg.ForkEnabled()
+	m.PermissionMode = cfg.PermissionMode
+
 	p := tea.NewProgram(m)
 
 	if _, err := p.Run(); err != nil {
