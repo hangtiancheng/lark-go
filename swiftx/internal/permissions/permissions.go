@@ -149,8 +149,9 @@ func NewPathSandbox(projectRoot string, extraAllowed ...string) *PathSandbox {
 	return &PathSandbox{allowedRoots: allowed, denyWrite: denyWrite}
 }
 
-// CheckDenyWrite 单独检查受保护路径。这类路径存放权限配置与 Skill 定义，
-// 任何权限模式下都不允许写入，调用方需要在模式判断之前调用它。
+// CheckDenyWrite checks protected paths in isolation. These paths hold
+// permission configuration and skill definitions; writes are denied under
+// every permission mode, so callers must invoke it before the mode check.
 func (s *PathSandbox) CheckDenyWrite(path string) (bool, string) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
@@ -246,8 +247,10 @@ func globMatch(pattern, content string) bool {
 	return matched
 }
 
-// cachedRules 是单个规则文件的解析结果。modTime + size 一起作为文件是否变动的依据，
-// 只比 modTime 不够：同一秒内的连续改写在部分文件系统上时间戳可能不变。
+// cachedRules holds the parsed result of a single rule file. modTime and size
+// together determine whether the file changed; comparing modTime alone is not
+// enough, since consecutive writes within the same second may leave the
+// timestamp unchanged on some filesystems.
 type cachedRules struct {
 	modTime time.Time
 	size    int64
@@ -259,13 +262,16 @@ type RuleEngine struct {
 	ProjectPath string
 	LocalPath   string
 
-	// 后台记忆 Agent 与主 Agent 可能共用同一个引擎，缓存读写要加锁
+	// The background memory agent and the main agent may share the same
+	// engine, so cache reads and writes must be locked.
 	mu    sync.Mutex
 	cache map[string]cachedRules
 }
 
-// NewRuleEngine 按约定路径构造规则引擎：用户级放在 home 目录下，
-// 项目级与本地级放在工作目录下。取不到 home 时用户级留空，该层按空规则处理。
+// NewRuleEngine builds a rule engine using conventional paths: the user-level
+// file lives under the home directory, while the project-level and local-level
+// files live under the working directory. When home cannot be resolved the
+// user-level path is left empty and that layer is treated as having no rules.
 func NewRuleEngine(workDir string) *RuleEngine {
 	e := &RuleEngine{
 		ProjectPath: filepath.Join(workDir, ".swiftx", "permissions.yaml"),
@@ -277,16 +283,20 @@ func NewRuleEngine(workDir string) *RuleEngine {
 	return e
 }
 
-// Evaluate 把三份规则文件的规则合并成一个集合，返回命中规则中最严格的效果。
-// 优先级 deny > ask > allow：规则写在哪一层、写在文件第几行都不影响裁决，
-// 因此一条 deny 无法被其他层的 allow 抵消。没有任何规则命中时返回 nil。
+// Evaluate merges the rules from the three rule files into a single set and
+// returns the strictest effect among the matched rules. Priority is
+// deny > ask > allow: which layer a rule lives in, or which line of the file
+// it is on, does not affect the decision, so a single deny cannot be
+// overridden by an allow in another layer. Returns nil when no rule matches.
 func (e *RuleEngine) Evaluate(toolName, content string) *RuleEffect {
 	return EvaluateRules(e.Snapshot(), toolName, content)
 }
 
-// Snapshot 取三份规则文件的合并快照。文件没变动时直接复用上次的解析结果，
-// 变动了才重新读盘，因此改完规则文件下次评估即刻生效，反复评估也不会重复解析。
-// 一次工具调用取一次快照，复合命令逐条检查子命令时共用它。
+// Snapshot returns a merged snapshot of the three rule files. When a file has
+// not changed, the previous parse result is reused; it is only re-read from
+// disk when changed, so edits to a rule file take effect on the next
+// evaluation without re-parsing on repeated evaluations. One snapshot is taken
+// per tool call and shared when a compound command checks its sub-commands.
 func (e *RuleEngine) Snapshot() []Rule {
 	var all []Rule
 	for _, path := range []string{e.UserPath, e.ProjectPath, e.LocalPath} {
@@ -295,7 +305,8 @@ func (e *RuleEngine) Snapshot() []Rule {
 	return all
 }
 
-// rulesFor 返回单个规则文件的规则，命中缓存时不读盘也不解析。
+// rulesFor returns the rules of a single rule file, without reading from disk
+// or parsing when the cache is hit.
 func (e *RuleEngine) rulesFor(path string) []Rule {
 	if path == "" {
 		return nil
@@ -303,7 +314,8 @@ func (e *RuleEngine) rulesFor(path string) []Rule {
 
 	info, err := os.Stat(path)
 	if err != nil {
-		// 文件不存在或读不到，按空规则处理，同时清掉可能存在的旧缓存
+		// The file does not exist or cannot be read; treat it as having no
+		// rules and drop any stale cache entry.
 		e.mu.Lock()
 		delete(e.cache, path)
 		e.mu.Unlock()
@@ -324,8 +336,8 @@ func (e *RuleEngine) rulesFor(path string) []Rule {
 	return rules
 }
 
-// EvaluateRules 在给定规则集上裁决，优先级 deny > ask > allow。
-// 没有任何规则命中时返回 nil。
+// EvaluateRules decides over the given rule set, with priority deny > ask >
+// allow. Returns nil when no rule matches.
 func EvaluateRules(rules []Rule, toolName, content string) *RuleEffect {
 	var hit *RuleEffect
 	for _, r := range rules {
@@ -334,14 +346,16 @@ func EvaluateRules(rules []Rule, toolName, content string) *RuleEffect {
 		}
 		switch r.Effect {
 		case RuleDeny:
-			// deny 已是最严效果，不可能再被压过，直接返回
+			// deny is already the strictest effect and cannot be overridden;
+			// return immediately.
 			eff := RuleDeny
 			return &eff
 		case RuleAsk:
 			eff := RuleAsk
 			hit = &eff
 		case RuleAllow:
-			// allow 最弱，只在还没命中更严的效果时记录
+			// allow is the weakest; record it only when no stricter effect
+			// has been matched yet.
 			if hit == nil {
 				eff := RuleAllow
 				hit = &eff
@@ -501,8 +515,10 @@ func NewChecker(sandbox *PathSandbox, ruleEngine *RuleEngine, mode PermissionMod
 func (c *Checker) Check(tool tools.Tool, args map[string]any) Decision {
 	content := ExtractContent(tool.Name(), args)
 	cat := tool.Category()
-	// 规则快照按需取一次：安全命令、危险命令这些在前面几层就返回，压根不必碰规则文件；
-	// 复合命令逐条检查子命令时共用同一份快照，不重复读盘
+	// The rule snapshot is taken lazily once: safe commands, dangerous
+	// commands, and the like return in earlier layers and never need to touch
+	// the rule files; compound commands share the same snapshot when checking
+	// sub-commands, avoiding repeated disk reads.
 	snapshot := sync.OnceValue(c.RuleEngine.Snapshot)
 
 	// Layer 0: Plan mode plan-file write exception
@@ -549,7 +565,8 @@ func (c *Checker) Check(tool tools.Tool, args map[string]any) Decision {
 
 	// Layer 3: path sandbox (file tools)
 	if (cat == tools.CategoryRead || cat == tools.CategoryWrite) && content != "" {
-		// 受保护路径优先判定：写入权限配置或 Skill 定义一律拒绝，bypass 模式同样拦截
+		// Protected paths are decided first: writes to permission config or
+		// skill definitions are always denied, even in bypass mode.
 		if cat == tools.CategoryWrite {
 			if ok, reason := c.Sandbox.CheckDenyWrite(content); !ok {
 				return Decision{Effect: Deny, Reason: reason}

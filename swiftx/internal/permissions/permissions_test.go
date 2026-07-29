@@ -116,7 +116,8 @@ func TestParseRule(t *testing.T) {
 	}
 }
 
-// 同一文件内的书写顺序不参与裁决，两种顺序都应该判 deny
+// The order in which rules are written within a single file does not affect
+// the decision; both orderings should result in deny.
 func TestRuleEngineDenyBeatsAllowInSameFile(t *testing.T) {
 	for _, order := range []struct {
 		name  string
@@ -142,7 +143,7 @@ func TestRuleEngineDenyBeatsAllowInSameFile(t *testing.T) {
 	}
 }
 
-// 写入规则文件，供跨层用例构造各层内容
+// writeRules writes a rule file for cross-layer test cases to build per-layer content.
 func writeRules(t *testing.T, path string, body string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
@@ -150,7 +151,8 @@ func writeRules(t *testing.T, path string, body string) {
 	}
 }
 
-// 三份文件合并为一个集合，deny 无论写在哪一层都压过其他层的 allow
+// The three files are merged into a single set; a deny in any layer overrides
+// allow in the other layers.
 func TestRuleEngineMergesAcrossFiles(t *testing.T) {
 	allowRule := "- rule: Bash(git*)\n  effect: allow\n"
 	denyRule := "- rule: Bash(git*)\n  effect: deny\n"
@@ -188,7 +190,8 @@ func TestRuleEngineMergesAcrossFiles(t *testing.T) {
 	}
 }
 
-// 按约定路径装配三层规则文件，用户级取 home、项目级与本地级取工作目录
+// Assembles the three-layer rule files at conventional paths: user-level under
+// home, project-level and local-level under the working directory.
 func TestNewRuleEnginePaths(t *testing.T) {
 	dir := t.TempDir()
 	eng := NewRuleEngine(dir)
@@ -199,7 +202,8 @@ func TestNewRuleEnginePaths(t *testing.T) {
 	if want := filepath.Join(dir, ".swiftx", "permissions.local.yaml"); eng.LocalPath != want {
 		t.Errorf("LocalPath = %q, want %q", eng.LocalPath, want)
 	}
-	// 取不到 home 时用户级留空，此时该层按空规则处理而非报错
+	// When home cannot be resolved the user-level path is left empty; that
+	// layer is treated as having no rules rather than erroring.
 	if home, err := os.UserHomeDir(); err == nil {
 		if want := filepath.Join(home, ".swiftx", "permissions.yaml"); eng.UserPath != want {
 			t.Errorf("UserPath = %q, want %q", eng.UserPath, want)
@@ -207,16 +211,17 @@ func TestNewRuleEnginePaths(t *testing.T) {
 	}
 }
 
-// 文件没变动时复用上次的解析结果，不重复读盘
+// Reuses the previous parse result when the file has not changed, avoiding
+// repeated disk reads.
 func TestRuleEngineReusesParsedRules(t *testing.T) {
 	dir := t.TempDir()
 	eng := &RuleEngine{ProjectPath: filepath.Join(dir, "project.yaml")}
 
 	const allowRule = "- rule: Bash(git*)\n  effect: allow\n"
-	// 与 allowRule 等长，用尾随空格补齐，YAML 解析时会被忽略
+	// Same length as allowRule, padded with a trailing space that YAML parsing ignores.
 	const denyRuleSameSize = "- rule: Bash(git*)\n  effect: deny \n"
 	if len(allowRule) != len(denyRuleSameSize) {
-		t.Fatalf("两段规则长度必须一致才能构造出 size 不变的场景")
+		t.Fatalf("the two rules must have equal length to construct a same-size scenario")
 	}
 
 	writeRules(t, eng.ProjectPath, allowRule)
@@ -224,8 +229,9 @@ func TestRuleEngineReusesParsedRules(t *testing.T) {
 		t.Fatalf("expected Allow, got %v", res)
 	}
 
-	// 偷偷把内容换成 deny，同时把 size 和 mtime 都还原成原样：
-	// 引擎看不出文件动过，应当继续用缓存里的解析结果
+	// Silently swap the content to deny while restoring both size and mtime:
+	// the engine cannot tell the file changed and should keep using the cached
+	// parse result.
 	info, err := os.Stat(eng.ProjectPath)
 	if err != nil {
 		t.Fatalf("stat: %v", err)
@@ -236,11 +242,12 @@ func TestRuleEngineReusesParsedRules(t *testing.T) {
 	}
 
 	if res := eng.Evaluate("Bash", "git status"); res == nil || *res != RuleAllow {
-		t.Errorf("文件看起来没变动时应复用缓存，got %v", res)
+		t.Errorf("cache should be reused when the file appears unchanged, got %v", res)
 	}
 }
 
-// 长度相同但内容变了，只要修改时间前进就要重新解析
+// Same length but changed content; as long as the modification time advances,
+// it must be re-parsed.
 func TestRuleEngineDetectsSameSizeEdit(t *testing.T) {
 	dir := t.TempDir()
 	eng := &RuleEngine{ProjectPath: filepath.Join(dir, "project.yaml")}
@@ -251,18 +258,20 @@ func TestRuleEngineDetectsSameSizeEdit(t *testing.T) {
 	}
 
 	writeRules(t, eng.ProjectPath, "- rule: Bash(git*)\n  effect: deny \n")
-	// 把修改时间显式前移，模拟秒级时间戳文件系统上的一次真实改动
+	// Explicitly advance the modification time to simulate a real edit on a
+	// filesystem with second-granularity timestamps.
 	future := time.Now().Add(2 * time.Second)
 	if err := os.Chtimes(eng.ProjectPath, future, future); err != nil {
 		t.Fatalf("chtimes: %v", err)
 	}
 
 	if res := eng.Evaluate("Bash", "git status"); res == nil || *res != RuleDeny {
-		t.Errorf("修改时间变了应重新解析，got %v", res)
+		t.Errorf("a changed modification time should trigger re-parsing, got %v", res)
 	}
 }
 
-// 规则文件消失后按空规则处理，不残留上一次的缓存
+// Once a rule file is removed it is treated as having no rules, with no stale
+// cache left behind.
 func TestRuleEngineDropsCacheWhenFileRemoved(t *testing.T) {
 	dir := t.TempDir()
 	eng := &RuleEngine{ProjectPath: filepath.Join(dir, "project.yaml")}
@@ -276,11 +285,11 @@ func TestRuleEngineDropsCacheWhenFileRemoved(t *testing.T) {
 		t.Fatalf("remove: %v", err)
 	}
 	if res := eng.Evaluate("Bash", "git status"); res != nil {
-		t.Errorf("文件已删除应按空规则处理，got %v", *res)
+		t.Errorf("a removed file should be treated as having no rules, got %v", *res)
 	}
 }
 
-// 改完规则文件无需重建引擎即刻生效
+// Edits to a rule file take effect immediately without rebuilding the engine.
 func TestRuleEnginePicksUpFileChanges(t *testing.T) {
 	dir := t.TempDir()
 	eng := &RuleEngine{ProjectPath: filepath.Join(dir, "project.yaml")}
@@ -290,14 +299,14 @@ func TestRuleEnginePicksUpFileChanges(t *testing.T) {
 		t.Fatalf("expected Allow, got %v", res)
 	}
 
-	// 同一个引擎实例，改完文件后立即反映新规则
+	// The same engine instance reflects the new rules right after the file changes.
 	writeRules(t, eng.ProjectPath, "- rule: Bash(git*)\n  effect: deny\n")
 	if res := eng.Evaluate("Bash", "git status"); res == nil || *res != RuleDeny {
 		t.Errorf("expected Deny after file change, got %v", res)
 	}
 }
 
-// ask 压过 allow、但压不过 deny
+// ask overrides allow, but not deny.
 func TestRuleEngineAskPriority(t *testing.T) {
 	dir := t.TempDir()
 	eng := &RuleEngine{
@@ -317,7 +326,7 @@ func TestRuleEngineAskPriority(t *testing.T) {
 	}
 }
 
-// 受保护路径任何模式下都不许写，bypass 也不例外
+// Protected paths are never writable under any mode, including bypass.
 func TestDenyWriteBlockedInBypassMode(t *testing.T) {
 	dir := t.TempDir()
 	chk := NewChecker(NewPathSandbox(dir), &RuleEngine{}, ModeBypass)
@@ -334,14 +343,14 @@ func TestDenyWriteBlockedInBypassMode(t *testing.T) {
 		}
 	}
 
-	// 同目录下的普通文件不受影响
+	// Ordinary files in the same directory are unaffected.
 	d := chk.Check(write, map[string]any{"file_path": filepath.Join(dir, "a.txt")})
 	if d.Effect == Deny {
 		t.Errorf("ordinary file write should not be denied, got %s", d.Reason)
 	}
 }
 
-// ask 规则要弹确认框，不能被当成拒绝
+// An ask rule should prompt for confirmation, not be treated as a denial.
 func TestCheckerAskRuleAsksUser(t *testing.T) {
 	dir := t.TempDir()
 	eng := &RuleEngine{LocalPath: filepath.Join(dir, "local.yaml")}
@@ -482,7 +491,7 @@ func TestSandboxAutoAllowRespectsCompoundDeny(t *testing.T) {
 	sb := NewPathSandbox(dir)
 	local := filepath.Join(dir, "local.yaml")
 	eng := &RuleEngine{LocalPath: local}
-	// filepath.Match 的 * 不跨空格，用精确命令作为 pattern
+	// filepath.Match's * does not span spaces, so use the exact command as the pattern.
 	eng.AppendLocalRule(Rule{ToolName: "Bash", Pattern: "rm -rf /", Effect: RuleDeny})
 
 	chk := NewChecker(sb, eng, ModeDefault)
@@ -490,13 +499,15 @@ func TestSandboxAutoAllowRespectsCompoundDeny(t *testing.T) {
 
 	bash := &fakeTool{name: "Bash", cat: tools.CategoryCommand}
 
-	// 复合命令中 rm 子命令应触发 deny，即使沙箱已开启
+	// The rm sub-command in a compound command should trigger deny, even with
+	// the sandbox enabled.
 	d := chk.Check(bash, map[string]any{"command": "echo ok && rm -rf /"})
 	if d.Effect != Deny {
 		t.Errorf("compound command with denied subcommand should be Deny, got %v", d)
 	}
 
-	// 单条安全命令在沙箱下应 auto-allow（不匹配任何 deny 规则）
+	// A single safe command under the sandbox should be auto-allowed (matching
+	// no deny rule).
 	d = chk.Check(bash, map[string]any{"command": "go test ./..."})
 	if d.Effect != Allow {
 		t.Errorf("safe command with sandbox should be Allow, got %v", d)
@@ -515,7 +526,7 @@ func TestSandboxAutoAllowRespectsAskRule(t *testing.T) {
 
 	bash := &fakeTool{name: "Bash", cat: tools.CategoryCommand}
 
-	// 显式 ask 规则在沙箱下不应被自动放行
+	// An explicit ask rule should not be auto-allowed under the sandbox.
 	d := chk.Check(bash, map[string]any{"command": "git push origin main"})
 	if d.Effect != Ask {
 		t.Errorf("ask rule should not be overridden by sandbox, got %v", d)
