@@ -86,10 +86,10 @@ type askUserResponseData struct {
 
 // Server is the core of Remote Control, bridging Agent events and WebSocket clients
 type Server struct {
-	providers  []config.ProviderConfig
-	mcpConfigs []config.MCPServerConfig
-	hookCfgs   []hooks.Hook
-	addr       string
+	providers   []config.ProviderConfig
+	mcpConfigs  []config.MCPServerConfig
+	hookConfigs []hooks.Hook
+	addr        string
 
 	mu    sync.Mutex
 	conns map[*swifty_http.WSConn]struct{}
@@ -135,7 +135,7 @@ func NewServer(providers []config.ProviderConfig, mcpConfigs []config.MCPServerC
 	return &Server{
 		providers:             providers,
 		mcpConfigs:            mcpConfigs,
-		hookCfgs:              hookCfgs,
+		hookConfigs:           hookCfgs,
 		addr:                  addr,
 		enableCoordinatorMode: enableCoordinatorMode,
 		forkDisabled:          forkDisabled,
@@ -289,15 +289,13 @@ func (s *Server) initAgent() error {
 	}
 	ag.Checker = permissions.NewChecker(
 		permissions.NewPathSandbox(wd, sandboxAllow...),
-		&permissions.RuleEngine{
-			LocalPath: filepath.Join(wd, ".swiftx", "permissions.local.yaml"),
-		},
+		permissions.NewRuleEngine(wd),
 		permissions.ModeDefault,
 	)
 
-	if len(s.hookCfgs) > 0 {
+	if len(s.hookConfigs) > 0 {
 		eng := hooks.NewEngine()
-		eng.LoadHooks(s.hookCfgs)
+		eng.LoadHooks(s.hookConfigs)
 		eng.AgentRunner = newAgentHookRunner(client)
 		ag.Hooks = eng
 	}
@@ -600,8 +598,7 @@ func (s *Server) buildCommandContext(args string) *commands.Context {
 			}
 			return "default"
 		},
-		SetPermissionMode: func(mode string) error { return nil },
-		ToolCount:         func() int { return len(s.registry.ListTools()) },
+		ToolCount: func() int { return len(s.registry.ListTools()) },
 		SessionInfo: func() string {
 			return fmt.Sprintf("Session: %s\nCWD: %s", s.sessionID, wd)
 		},

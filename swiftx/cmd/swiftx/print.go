@@ -176,9 +176,7 @@ func runPrint(userPrompt string, cfg *config.AppConfig, hookCfgs []hooks.Hook, o
 	}
 	ag.Checker = permissions.NewChecker(
 		permissions.NewPathSandbox(wd, sandboxAllow...),
-		&permissions.RuleEngine{
-			LocalPath: filepath.Join(wd, ".swiftx", "permissions.local.yaml"),
-		},
+		permissions.NewRuleEngine(wd),
 		permissions.ModeBypass,
 	)
 

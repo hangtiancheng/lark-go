@@ -461,9 +461,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		pathSandbox := permissions.NewPathSandbox(wd, sandboxAllow...)
 		ag.Checker = permissions.NewChecker(
 			pathSandbox,
-			&permissions.RuleEngine{
-				LocalPath: filepath.Join(wd, ".swiftx", "permissions.local.yaml"),
-			},
+			permissions.NewRuleEngine(wd),
 			m.asPermissionMode(),
 		)
 		// Initialize the OS-level sandbox based on the config file
@@ -1289,9 +1287,7 @@ func (m Model) handleProviderSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		pathSandbox2 := permissions.NewPathSandbox(wd, sandboxAllow...)
 		ag.Checker = permissions.NewChecker(
 			pathSandbox2,
-			&permissions.RuleEngine{
-				LocalPath: filepath.Join(wd, ".swiftx", "permissions.local.yaml"),
-			},
+			permissions.NewRuleEngine(wd),
 			m.asPermissionMode(),
 		)
 		// Initialize the OS-level sandbox based on the config file
@@ -1736,19 +1732,6 @@ func (m Model) buildCommandContext(args string) *commands.Context {
 				return string(m.ag.Checker.Mode)
 			}
 			return "default"
-		},
-		SetPermissionMode: func(mode string) error {
-			if m.ag == nil || m.ag.Checker == nil {
-				return fmt.Errorf("permission system not initialized")
-			}
-			target := permissions.PermissionMode(mode)
-			switch target {
-			case permissions.ModeDefault, permissions.ModeAcceptEdits, permissions.ModePlan, permissions.ModeBypass:
-				m.ag.Checker.Mode = target
-				return nil
-			default:
-				return fmt.Errorf("invalid mode: %s (expected: default|acceptEdits|plan|bypassPermissions)", mode)
-			}
 		},
 		ToolCount: func() int {
 			return len(m.registry.ListTools())

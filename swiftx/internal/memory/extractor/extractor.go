@@ -42,7 +42,6 @@ import (
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/conversation"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/llm"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/memory"
-	"github.com/hangtiancheng/swifty.go/swiftx/internal/permissions"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/subagent"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/tools"
 )
@@ -204,17 +203,12 @@ func (e *Extractor) runExtraction(ctx context.Context, isTrailingRun bool) error
 
 	// Strict path sandbox: only memoryDir is allowed for file tools. This is stricter than the
 	// original createAutoMemCanUseTool (which lets Read/Grep/Glob roam unrestricted) but matches the
-	// prompt's explicit warning against grepping source code, so the behavioural impact is small and
+	// prompt's explicit warning against grepping source code, so the behavioral impact is small and
 	// the safety win is meaningful.
 	//
 	// Mode = ModeBypass so file/command tools never hit an Ask path — the extractor runs in the
 	// background with no TUI to answer.
-	sandboxRoots := []string{e.deps.MemoryDir}
-	if e.deps.UserMemoryDir != "" {
-		sandboxRoots = append(sandboxRoots, e.deps.UserMemoryDir)
-	}
-	subSandbox := permissions.NewPathSandbox(sandboxRoots[0], sandboxRoots[1:]...)
-	subChecker := permissions.NewChecker(subSandbox, &permissions.RuleEngine{}, permissions.ModeBypass)
+	subChecker := memory.NewSubAgentChecker(e.deps.ProjectRoot, e.deps.UserMemoryDir)
 
 	subAgent := agent.New(e.deps.Client, subRegistry, e.deps.Protocol)
 	subAgent.MaxIterations = 5

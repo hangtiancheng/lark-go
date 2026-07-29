@@ -41,19 +41,18 @@ const (
 )
 
 type Context struct {
-	Args              string
-	MemoryList        func() []string
-	MemoryClear       func()
-	TokenCount        func() (input, output int)
-	PermissionMode    func() string
-	SetPermissionMode func(mode string) error
-	ToolCount         func() int
-	SessionInfo       func() string
-	SkillList         func() []SkillInfo
-	SkillReload       func() int // reload catalog + prompt, returns new skill count
-	MCPInfo           func() string
-	WorkDir           string
-	Model             string
+	Args           string
+	MemoryList     func() []string
+	MemoryClear    func()
+	TokenCount     func() (input, output int)
+	PermissionMode func() string
+	ToolCount      func() int
+	SessionInfo    func() string
+	SkillList      func() []SkillInfo
+	SkillReload    func() int // reload catalog + prompt, returns new skill count
+	MCPInfo        func() string
+	WorkDir        string
+	Model          string
 }
 
 type SkillInfo struct {
@@ -318,33 +317,6 @@ func CreateDefaultRegistry() *Registry {
 				return ctx.SessionInfo()
 			default:
 				return "Usage: /session [list|info]"
-			}
-		},
-	})
-
-	r.Register(&Command{
-		Name:        "permission",
-		Description: "Permission management",
-		Aliases:     []string{"perm"},
-		Type:        TypeLocal,
-		Handler: func(ctx *Context) string {
-			sub, rest := parseSubcommand(ctx.Args)
-			switch sub {
-			case "", "info":
-				return fmt.Sprintf("Current permission mode: %s", ctx.PermissionMode())
-			case "mode":
-				if rest == "" {
-					return "Usage: /permission mode <default|acceptEdits|plan|bypassPermissions>"
-				}
-				if ctx.SetPermissionMode == nil {
-					return "Permission mode switching is not supported in this context."
-				}
-				if err := ctx.SetPermissionMode(rest); err != nil {
-					return err.Error()
-				}
-				return fmt.Sprintf("Permission mode set to: %s", rest)
-			default:
-				return "Usage: /permission [info|mode <mode>|rules]"
 			}
 		},
 	})

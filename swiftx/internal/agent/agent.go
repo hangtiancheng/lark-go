@@ -602,7 +602,7 @@ func (a *Agent) executeSingleTool(ctx context.Context, eventCh chan AgentEvent, 
 				if len(content) > 60 {
 					pattern = content[:60] + "*"
 				}
-				a.Checker.AddSessionAllow(tc.toolName, pattern)
+				// 写入本地规则文件，规则引擎每次评估都现读现匹配，本轮之后即刻生效
 				a.Checker.RuleEngine.AppendLocalRule(permissions.Rule{
 					ToolName: tc.toolName,
 					Pattern:  pattern,

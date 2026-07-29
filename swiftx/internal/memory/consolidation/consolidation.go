@@ -39,7 +39,6 @@ import (
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/conversation"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/llm"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/memory"
-	"github.com/hangtiancheng/swifty.go/swiftx/internal/permissions"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/session"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/subagent"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/tools"
@@ -164,13 +163,7 @@ func (c *Consolidator) run(ctx context.Context, sessionIDs []string, priorMtime 
 	// Tool filter: give the consolidation sub-agent the async-level tool set
 	subRegistry := subagent.FilterToolsForAgent(c.deps.ToolRegistry, nil, nil, true)
 
-	// Path sandbox: only allow writes to memory directories
-	sandboxRoots := []string{c.deps.MemoryDir}
-	if c.deps.UserMemoryDir != "" {
-		sandboxRoots = append(sandboxRoots, c.deps.UserMemoryDir)
-	}
-	subSandbox := permissions.NewPathSandbox(sandboxRoots[0], sandboxRoots[1:]...)
-	subChecker := permissions.NewChecker(subSandbox, &permissions.RuleEngine{}, permissions.ModeBypass)
+	subChecker := memory.NewSubAgentChecker(c.deps.ProjectRoot, c.deps.UserMemoryDir)
 
 	subAgent := agent.New(c.deps.Client, subRegistry, c.deps.Protocol)
 	subAgent.MaxIterations = 15 // consolidation may require multiple read/write rounds

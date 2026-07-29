@@ -25,8 +25,9 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -148,17 +149,29 @@ func NewPathSandbox(projectRoot string, extraAllowed ...string) *PathSandbox {
 	return &PathSandbox{allowedRoots: allowed, denyWrite: denyWrite}
 }
 
+// CheckDenyWrite 单独检查受保护路径。这类路径存放权限配置与 Skill 定义，
+// 任何权限模式下都不允许写入，调用方需要在模式判断之前调用它。
+func (s *PathSandbox) CheckDenyWrite(path string) (bool, string) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return false, fmt.Sprintf("cannot resolve path: %s", path)
+	}
+	for _, deny := range s.denyWrite {
+		if abs == deny || strings.HasPrefix(abs, deny+string(filepath.Separator)) {
+			return false, fmt.Sprintf("protected path: %s", path)
+		}
+	}
+	return true, ""
+}
+
 func (s *PathSandbox) Check(path string) (bool, string) {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return false, fmt.Sprintf("cannot resolve path: %s", path)
 	}
 
-	// Check protected paths first: deny immediately on match.
-	for _, deny := range s.denyWrite {
-		if abs == deny || strings.HasPrefix(abs, deny+string(filepath.Separator)) {
-			return false, fmt.Sprintf("protected path: %s", path)
-		}
+	if ok, reason := s.CheckDenyWrite(path); !ok {
+		return false, reason
 	}
 
 	for _, root := range s.allowedRoots {
@@ -222,7 +235,8 @@ func globMatch(pattern, content string) bool {
 		case '?':
 			re.WriteString(".")
 		case '.', '+', '^', '$', '{', '}', '(', ')', '|', '[', ']', '\\':
-			re.WriteString("\\" + string(ch))
+			re.WriteString("\\")
+			re.WriteString(string(ch))
 		default:
 			re.WriteString(string(ch))
 		}
@@ -232,23 +246,109 @@ func globMatch(pattern, content string) bool {
 	return matched
 }
 
+// cachedRules 是单个规则文件的解析结果。modTime + size 一起作为文件是否变动的依据，
+// 只比 modTime 不够：同一秒内的连续改写在部分文件系统上时间戳可能不变。
+type cachedRules struct {
+	modTime time.Time
+	size    int64
+	rules   []Rule
+}
+
 type RuleEngine struct {
 	UserPath    string
 	ProjectPath string
 	LocalPath   string
+
+	// 后台记忆 Agent 与主 Agent 可能共用同一个引擎，缓存读写要加锁
+	mu    sync.Mutex
+	cache map[string]cachedRules
 }
 
+// NewRuleEngine 按约定路径构造规则引擎：用户级放在 home 目录下，
+// 项目级与本地级放在工作目录下。取不到 home 时用户级留空，该层按空规则处理。
+func NewRuleEngine(workDir string) *RuleEngine {
+	e := &RuleEngine{
+		ProjectPath: filepath.Join(workDir, ".swiftx", "permissions.yaml"),
+		LocalPath:   filepath.Join(workDir, ".swiftx", "permissions.local.yaml"),
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		e.UserPath = filepath.Join(home, ".swiftx", "permissions.yaml")
+	}
+	return e
+}
+
+// Evaluate 把三份规则文件的规则合并成一个集合，返回命中规则中最严格的效果。
+// 优先级 deny > ask > allow：规则写在哪一层、写在文件第几行都不影响裁决，
+// 因此一条 deny 无法被其他层的 allow 抵消。没有任何规则命中时返回 nil。
 func (e *RuleEngine) Evaluate(toolName, content string) *RuleEffect {
+	return EvaluateRules(e.Snapshot(), toolName, content)
+}
+
+// Snapshot 取三份规则文件的合并快照。文件没变动时直接复用上次的解析结果，
+// 变动了才重新读盘，因此改完规则文件下次评估即刻生效，反复评估也不会重复解析。
+// 一次工具调用取一次快照，复合命令逐条检查子命令时共用它。
+func (e *RuleEngine) Snapshot() []Rule {
+	var all []Rule
 	for _, path := range []string{e.UserPath, e.ProjectPath, e.LocalPath} {
-		rules := loadRulesFile(path)
-		for _, v := range slices.Backward(rules) {
-			if v.Matches(toolName, content) {
-				eff := v.Effect
-				return &eff
+		all = append(all, e.rulesFor(path)...)
+	}
+	return all
+}
+
+// rulesFor 返回单个规则文件的规则，命中缓存时不读盘也不解析。
+func (e *RuleEngine) rulesFor(path string) []Rule {
+	if path == "" {
+		return nil
+	}
+
+	info, err := os.Stat(path)
+	if err != nil {
+		// 文件不存在或读不到，按空规则处理，同时清掉可能存在的旧缓存
+		e.mu.Lock()
+		delete(e.cache, path)
+		e.mu.Unlock()
+		return nil
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if c, ok := e.cache[path]; ok && c.modTime.Equal(info.ModTime()) && c.size == info.Size() {
+		return c.rules
+	}
+
+	rules := loadRulesFile(path)
+	if e.cache == nil {
+		e.cache = make(map[string]cachedRules)
+	}
+	e.cache[path] = cachedRules{modTime: info.ModTime(), size: info.Size(), rules: rules}
+	return rules
+}
+
+// EvaluateRules 在给定规则集上裁决，优先级 deny > ask > allow。
+// 没有任何规则命中时返回 nil。
+func EvaluateRules(rules []Rule, toolName, content string) *RuleEffect {
+	var hit *RuleEffect
+	for _, r := range rules {
+		if !r.Matches(toolName, content) {
+			continue
+		}
+		switch r.Effect {
+		case RuleDeny:
+			// deny 已是最严效果，不可能再被压过，直接返回
+			eff := RuleDeny
+			return &eff
+		case RuleAsk:
+			eff := RuleAsk
+			hit = &eff
+		case RuleAllow:
+			// allow 最弱，只在还没命中更严的效果时记录
+			if hit == nil {
+				eff := RuleAllow
+				hit = &eff
 			}
 		}
 	}
-	return nil
+	return hit
 }
 
 func (e *RuleEngine) AppendLocalRule(r Rule) {
@@ -388,50 +488,22 @@ type Checker struct {
 	// When enabled, Bash commands execute inside the sandbox; with autoAllow
 	// confirmation can be skipped.
 	SandboxEnabled bool
-	// sessionAllowed is Layer 4b: session-level allow-always set (in-memory).
-	// Stored as "ToolName:pattern"; recorded when the user chooses always allow.
-	// Disappears when the session ends; never written to disk.
-	sessionAllowed map[string]bool
 }
 
 func NewChecker(sandbox *PathSandbox, ruleEngine *RuleEngine, mode PermissionMode) *Checker {
 	return &Checker{
-		Sandbox:        sandbox,
-		RuleEngine:     ruleEngine,
-		Mode:           mode,
-		sessionAllowed: make(map[string]bool),
+		Sandbox:    sandbox,
+		RuleEngine: ruleEngine,
+		Mode:       mode,
 	}
-}
-
-// AddSessionAllow adds the tool+content pattern to the session-level allow set
-// (Layer 4b).
-func (c *Checker) AddSessionAllow(toolName, content string) {
-	key := toolName + ":" + content
-	c.sessionAllowed[key] = true
-}
-
-// checkSessionAllowed checks whether the tool+content matches a session-level
-// allow-always record.
-func (c *Checker) checkSessionAllowed(toolName, content string) bool {
-	if len(c.sessionAllowed) == 0 {
-		return false
-	}
-	key := toolName + ":" + content
-	if c.sessionAllowed[key] {
-		return true
-	}
-	// Prefix match: the recorded pattern may have a trailing wildcard *.
-	for allowed := range c.sessionAllowed {
-		if strings.HasSuffix(allowed, "*") && strings.HasPrefix(key, allowed[:len(allowed)-1]) {
-			return true
-		}
-	}
-	return false
 }
 
 func (c *Checker) Check(tool tools.Tool, args map[string]any) Decision {
 	content := ExtractContent(tool.Name(), args)
 	cat := tool.Category()
+	// 规则快照按需取一次：安全命令、危险命令这些在前面几层就返回，压根不必碰规则文件；
+	// 复合命令逐条检查子命令时共用同一份快照，不重复读盘
+	snapshot := sync.OnceValue(c.RuleEngine.Snapshot)
 
 	// Layer 0: Plan mode plan-file write exception
 	if c.Mode == ModePlan && cat == tools.CategoryWrite && isPlanFile(content, c.PlanFilePath) {
@@ -461,7 +533,7 @@ func (c *Checker) Check(tool tools.Tool, args map[string]any) Decision {
 		subcommands := splitCompoundCommand(content)
 		var hasAsk bool
 		for _, sub := range subcommands {
-			r := c.RuleEngine.Evaluate(tool.Name(), sub)
+			r := EvaluateRules(snapshot(), tool.Name(), sub)
 			if r != nil && *r == RuleDeny {
 				return Decision{Effect: Deny, Reason: "Permission rule: deny"}
 			}
@@ -477,6 +549,12 @@ func (c *Checker) Check(tool tools.Tool, args map[string]any) Decision {
 
 	// Layer 3: path sandbox (file tools)
 	if (cat == tools.CategoryRead || cat == tools.CategoryWrite) && content != "" {
+		// 受保护路径优先判定：写入权限配置或 Skill 定义一律拒绝，bypass 模式同样拦截
+		if cat == tools.CategoryWrite {
+			if ok, reason := c.Sandbox.CheckDenyWrite(content); !ok {
+				return Decision{Effect: Deny, Reason: reason}
+			}
+		}
 		ok, reason := c.Sandbox.Check(content)
 		if !ok {
 			if c.Mode == ModeBypass {
@@ -488,20 +566,19 @@ func (c *Checker) Check(tool tools.Tool, args map[string]any) Decision {
 	}
 
 	// Layer 4: rule engine
-	ruleResult := c.RuleEngine.Evaluate(tool.Name(), content)
+	ruleResult := EvaluateRules(snapshot(), tool.Name(), content)
 	if ruleResult != nil {
-		if *ruleResult == RuleAllow {
+		switch *ruleResult {
+		case RuleAllow:
 			return Decision{Effect: Allow, Reason: "Permission rule: allow"}
+		case RuleAsk:
+			return Decision{Effect: Ask, Reason: "Permission rule: ask"}
+		default:
+			return Decision{Effect: Deny, Reason: "Permission rule: deny"}
 		}
-		return Decision{Effect: Deny, Reason: "Permission rule: deny"}
 	}
 
-	// Layer 4b: session-level allow (in-memory, takes priority over mode fallback).
-	if c.checkSessionAllowed(tool.Name(), content) {
-		return Decision{Effect: Allow, Reason: "Session allow-always"}
-	}
-
-	// Layer 4: permission mode
+	// Layer 4b: permission mode
 	effect := ModeDecide(c.Mode, cat)
 	if effect == Allow {
 		return Decision{Effect: Allow, Reason: fmt.Sprintf("Permission mode %s: allow", c.Mode)}
