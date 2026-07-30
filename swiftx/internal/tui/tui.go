@@ -3414,9 +3414,9 @@ func (m Model) renderChatView() string {
 }
 
 func (m Model) renderBanner() string {
-	cat := bannerStyle.Render(` /\_/\    `) + bannerDimStyle.Render("Swiftx v0.1.0") + "\n" +
-		bannerStyle.Render(`( o.o )   `) + bannerDimStyle.Render(m.getModelName()) + "\n" +
-		bannerStyle.Render(` > ^ <    `) + bannerDimStyle.Render(m.getWorkDir())
+	cat := bannerStyle.Render(` /\_/\    `) + bannerDimStyle.Render("Swiftx") + "\n" +
+		bannerStyle.Render(`( o o )   `) + bannerDimStyle.Render(m.getModelName()) + "\n" +
+		bannerStyle.Render(` >   <    `) + bannerDimStyle.Render(m.getWorkDir())
 	return cat
 }
 
