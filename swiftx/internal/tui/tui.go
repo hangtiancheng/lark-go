@@ -55,6 +55,8 @@ import (
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/todo"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/tools"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/worktree"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	"golang.org/x/text/width"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -504,7 +506,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			line := fmt.Sprintf("Skill %s (fork) failed: %v", msg.name, msg.err)
 			m.chatMessages = append(m.chatMessages, chatMessage{role: "error", content: line})
-			commit = errorStyle.Render("✖ " + line)
+			commit = errorStyle.Render("✗ " + line)
 		} else {
 			result := strings.TrimSpace(msg.result)
 			if result == "" {
@@ -544,7 +546,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				role:    "error",
 				content: errMsg,
 			})
-			mcpPrintLines = append(mcpPrintLines, errorStyle.Render("✖ "+errMsg))
+			mcpPrintLines = append(mcpPrintLines, errorStyle.Render("✗ "+errMsg))
 		}
 		registered := len(msg.result.Tools)
 		if registered > 0 {
@@ -570,10 +572,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				var sb strings.Builder
 				fmt.Fprintf(&sb, "## %s\n", srv.Name)
 				if srv.Instructions != "" {
-					sb.WriteString(srv.Instructions + "\n")
+					sb.WriteString(srv.Instructions)
+					sb.WriteString("\n")
 				}
 				if toolNames, ok := toolsByServer[srv.Name]; ok && len(toolNames) > 0 {
-					sb.WriteString("\nAvailable tools: " + strings.Join(toolNames, ", "))
+					sb.WriteString("\nAvailable tools: ")
+					sb.WriteString(strings.Join(toolNames, ", "))
 				}
 				mcpParts = append(mcpParts, sb.String())
 			}
@@ -1932,7 +1936,7 @@ func (m Model) executeCommand(name, args string) (tea.Model, tea.Cmd) {
 			displayText += " " + args
 		}
 		m.chatMessages = append(m.chatMessages, chatMessage{role: "user", content: displayText})
-		userLine := promptStyle.Render("❯ ") + lipgloss.NewStyle().Foreground(brightText).Bold(true).Render(displayText)
+		userLine := promptStyle.Render("> ") + lipgloss.NewStyle().Foreground(brightText).Bold(true).Render(displayText)
 		forkNotice := fmt.Sprintf("Forking skill %s in isolated sub-agent…", name)
 		m.chatMessages = append(m.chatMessages, chatMessage{role: "system", content: forkNotice})
 		m.committedUpTo = len(m.chatMessages)
@@ -2142,7 +2146,7 @@ func (m Model) renderPlanApprovalDialog() string {
 	for i, opt := range options {
 		prefix := "   "
 		if i == m.planApprovalCursor {
-			prefix = lipgloss.NewStyle().Foreground(brandPurple).Render(" ❯ ")
+			prefix = lipgloss.NewStyle().Foreground(brandPurple).Render(" > ")
 		}
 		label := opt
 		if i == m.planApprovalCursor {
@@ -2157,12 +2161,14 @@ func (m Model) renderPlanApprovalDialog() string {
 		if i == 2 {
 			inputLine := m.planApprovalInput
 			if m.planApprovalCursor == 2 {
-				inputLine += "█"
+				inputLine += "|"
 			}
-			if inputLine == "█" || inputLine == "" {
+			if inputLine == "|" || inputLine == "" {
 				placeholder := lipgloss.NewStyle().Foreground(dimText).Render("Type feedback here...")
 				if m.planApprovalCursor == 2 {
-					sb.WriteString("      " + placeholder + "\n")
+					sb.WriteString("      ")
+					sb.WriteString(placeholder)
+					sb.WriteString("\n")
 				}
 			} else {
 				sb.WriteString("      " + inputLine + "\n")
@@ -2279,7 +2285,7 @@ func (m Model) renderSandboxDialog() string {
 	for i, label := range labels {
 		prefix := "   "
 		if i == m.sandboxCursor {
-			prefix = lipgloss.NewStyle().Foreground(brandPurple).Render(" ❯ ")
+			prefix = lipgloss.NewStyle().Foreground(brandPurple).Render(" > ")
 		}
 		displayLabel := label
 		if i == m.sandboxCursor {
@@ -2563,7 +2569,7 @@ func (m Model) renderQuestionView() string {
 	for i, opt := range q.Options {
 		prefix := "   "
 		if i == cursor {
-			prefix = lipgloss.NewStyle().Foreground(brandPurple).Render(" ❯ ")
+			prefix = lipgloss.NewStyle().Foreground(brandPurple).Render(" > ")
 		}
 		if q.MultiSelect {
 			check := "○"
@@ -2585,7 +2591,7 @@ func (m Model) renderQuestionView() string {
 	otherIdx := len(q.Options)
 	prefix := "   "
 	if cursor == otherIdx {
-		prefix = lipgloss.NewStyle().Foreground(brandPurple).Render(" ❯ ")
+		prefix = lipgloss.NewStyle().Foreground(brandPurple).Render(" > ")
 	}
 	otherLabel := "Other"
 	if cursor == otherIdx {
@@ -2595,8 +2601,9 @@ func (m Model) renderQuestionView() string {
 	}
 	fmt.Fprintf(&sb, "%s%s", prefix, otherLabel)
 	if cursor == otherIdx {
-		input := m.askUserOther[m.askUserQIdx] + "█"
-		sb.WriteString(": " + input)
+		input := m.askUserOther[m.askUserQIdx] + "|"
+		sb.WriteString(": ")
+		sb.WriteString(input)
 	}
 	sb.WriteString("\n")
 	lines++
@@ -2648,11 +2655,15 @@ func (m Model) renderSubmitView() string {
 	// Submit / Cancel options
 	for i, opt := range []string{"Submit answers", "Cancel"} {
 		if i == m.askUserSubmitIdx {
-			prefix := lipgloss.NewStyle().Foreground(brandPurple).Render(" ❯ ")
+			prefix := lipgloss.NewStyle().Foreground(brandPurple).Render(" > ")
 			label := lipgloss.NewStyle().Bold(true).Render(opt)
-			sb.WriteString(prefix + label + "\n")
+			sb.WriteString(prefix)
+			sb.WriteString(label)
+			sb.WriteString("\n")
 		} else {
-			sb.WriteString("   " + opt + "\n")
+			sb.WriteString("   ")
+			sb.WriteString(opt)
+			sb.WriteString("\n")
 		}
 		lines++
 	}
@@ -2706,7 +2717,7 @@ func (m Model) sendMessage(text string) (tea.Model, tea.Cmd) {
 	expanded := expandAtRefs(text)
 
 	m.chatMessages = append(m.chatMessages, chatMessage{role: "user", content: text})
-	userLine := promptStyle.Render("❯ ") + lipgloss.NewStyle().Foreground(brightText).Bold(true).Render(text)
+	userLine := promptStyle.Render("> ") + lipgloss.NewStyle().Foreground(brightText).Bold(true).Render(text)
 	m.committedUpTo = len(m.chatMessages)
 	m.conversation.AddUserMessage(expanded)
 
@@ -2755,7 +2766,7 @@ func (m Model) sendPromptCommand(displayText, prompt string) (tea.Model, tea.Cmd
 	m.textarea.SetHeight(1)
 
 	m.chatMessages = append(m.chatMessages, chatMessage{role: "user", content: displayText})
-	userLine := promptStyle.Render("❯ ") + lipgloss.NewStyle().Foreground(brightText).Bold(true).Render(displayText)
+	userLine := promptStyle.Render("> ") + lipgloss.NewStyle().Foreground(brightText).Bold(true).Render(displayText)
 	m.committedUpTo = len(m.chatMessages)
 	m.conversation.AddUserMessage(prompt)
 
@@ -3115,7 +3126,7 @@ func renderToolBlockText(tb toolBlockInfo) string {
 func renderSubAgentBlock(sab *subAgentBlock, expanded bool) string {
 	var sb strings.Builder
 
-	agentLabel := strings.Title(sab.agentType)
+	agentLabel := cases.Title(language.AmericanEnglish).String(sab.agentType)
 	if agentLabel == "" {
 		agentLabel = "Agent"
 	}
@@ -3277,7 +3288,7 @@ func (m Model) renderProviderSelectView() string {
 
 	for i, p := range m.providers {
 		if i == m.providerCursor {
-			sb.WriteString(selectedItemStyle.Render(fmt.Sprintf("  ❯ %s  [%s]", p.Name, p.Model)))
+			sb.WriteString(selectedItemStyle.Render(fmt.Sprintf("  > %s  [%s]", p.Name, p.Model)))
 		} else {
 			sb.WriteString(normalItemStyle.Render(fmt.Sprintf("    %s  [%s]", p.Name, p.Model)))
 		}
@@ -3386,7 +3397,7 @@ func (m Model) renderChatView() string {
 		// Hide input when plan approval dialog is active
 		sb.WriteString(lipgloss.NewStyle().Foreground(dimText).Render("  Select an option above..."))
 	} else {
-		sb.WriteString(promptStyle.Render("❯ "))
+		sb.WriteString(promptStyle.Render("> "))
 		sb.WriteString(m.textarea.View())
 	}
 	sb.WriteString("\n")
@@ -3477,7 +3488,7 @@ func (m Model) DumpHistory() string {
 	for _, msg := range m.chatMessages {
 		switch msg.role {
 		case "user":
-			sb.WriteString(promptStyle.Render("❯ "))
+			sb.WriteString(promptStyle.Render("> "))
 			sb.WriteString(lipgloss.NewStyle().Foreground(brightText).Bold(true).Render(msg.content))
 			sb.WriteString("\n\n")
 
@@ -3508,7 +3519,7 @@ func (m Model) DumpHistory() string {
 			sb.WriteString("\n\n")
 
 		case "error":
-			sb.WriteString(errorStyle.Render("✖ " + msg.content))
+			sb.WriteString(errorStyle.Render("✗ " + msg.content))
 			sb.WriteString("\n\n")
 		}
 	}
@@ -3522,7 +3533,7 @@ func (m Model) renderChatContent() string {
 	for _, msg := range m.chatMessages[m.committedUpTo:] {
 		switch msg.role {
 		case "user":
-			sb.WriteString(promptStyle.Render("❯ "))
+			sb.WriteString(promptStyle.Render("> "))
 			sb.WriteString(lipgloss.NewStyle().Foreground(brightText).Bold(true).Render(msg.content))
 			sb.WriteString("\n\n")
 
@@ -3591,7 +3602,7 @@ func (m Model) renderChatContent() string {
 			sb.WriteString("\n\n")
 
 		case "error":
-			sb.WriteString(errorStyle.Render("✖ " + msg.content))
+			sb.WriteString(errorStyle.Render("✗ " + msg.content))
 			sb.WriteString("\n\n")
 		}
 	}
@@ -3647,7 +3658,7 @@ func (m Model) renderMessagesRange(from, to int) string {
 		msg := m.chatMessages[i]
 		switch msg.role {
 		case "user":
-			sb.WriteString(promptStyle.Render("❯ "))
+			sb.WriteString(promptStyle.Render("> "))
 			sb.WriteString(lipgloss.NewStyle().Foreground(brightText).Bold(true).Render(msg.content))
 			sb.WriteString("\n\n")
 		case "assistant":
@@ -3693,7 +3704,7 @@ func (m Model) renderMessagesRange(from, to int) string {
 			sb.WriteString(lipgloss.NewStyle().Foreground(dimText).PaddingLeft(2).Render(msg.content))
 			sb.WriteString("\n\n")
 		case "error":
-			sb.WriteString(errorStyle.Render("✖ " + msg.content))
+			sb.WriteString(errorStyle.Render("✗ " + msg.content))
 			sb.WriteString("\n\n")
 		}
 	}
@@ -3770,7 +3781,7 @@ func (m Model) renderPermDialog() string {
 		prefix := "   "
 		style := lipgloss.NewStyle().Foreground(dimText)
 		if i == m.permCursor {
-			prefix = " ❯ "
+			prefix = " > "
 			style = lipgloss.NewStyle().Foreground(cyanText)
 		}
 		label := fmt.Sprintf("%d. %s", i+1, opt.label)
@@ -3806,7 +3817,7 @@ func (m Model) renderRewindSnapshotList() string {
 		prefix := "   "
 		style := lipgloss.NewStyle().Foreground(dimText)
 		if i == m.rewindCursor {
-			prefix = " ❯ "
+			prefix = " > "
 			style = lipgloss.NewStyle().Foreground(cyanText)
 		}
 		ago := time.Since(snap.Timestamp).Truncate(time.Second)
@@ -3845,7 +3856,7 @@ func (m Model) renderRewindOptionsDialog() string {
 		prefix := "   "
 		style := lipgloss.NewStyle().Foreground(dimText)
 		if i == m.rewindOptionCursor {
-			prefix = " ❯ "
+			prefix = " > "
 			style = lipgloss.NewStyle().Foreground(cyanText)
 		}
 		sb.WriteString(style.Render(prefix+opt) + "\n")
@@ -4364,7 +4375,7 @@ func (m Model) renderResumeView() string {
 
 		prefix := "  "
 		if i == m.resumeCursor {
-			prefix = "❯ "
+			prefix = "> "
 			title = lipgloss.NewStyle().Foreground(cyanText).Bold(true).Render(title)
 		} else {
 			title = lipgloss.NewStyle().Foreground(normalText).Render(title)
