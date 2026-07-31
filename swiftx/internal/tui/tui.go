@@ -230,8 +230,9 @@ type Model struct {
 	askUserOnSubmit    bool
 	askUserSubmitIdx   int
 	skillCatalog       *skills.Catalog
-	// announcedSkills 记录已经告诉过模型的 Skill 名字。会话首条 system-reminder
-	// 带的是全量清单，之后只补新增的，避免重复占用上下文。
+	// announcedSkills tracks skill names already communicated to the model.
+	// The first system-reminder carries the full catalog; afterwards only new
+	// additions are appended to avoid redundant context usage.
 	announcedSkills    map[string]bool
 	taskMgr            *subagent.TaskManager
 	todoList           *todo.TaskList
@@ -457,7 +458,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		ag.MaxOutputTokens = p.GetMaxOutputTokens()
 		ag.Instructions = m.instructionsContent
 		ag.MemoryContent = m.memoryContent
-		// 首条 system-reminder 带全量 Skill 清单，之后由 SkillDeltaFn 只补新增的
+		// The first system-reminder carries the full skill catalog; afterwards
+		// SkillDeltaFn appends only newly added skills
 		ag.SkillSection = m.skillDelta()
 		ag.SkillDeltaFn = m.skillDelta
 		ag.FileHistory = m.fileHistory
@@ -853,8 +855,9 @@ func (m *Model) wireSkillsToAgent() {
 	m.registry.Register(&skills.InstallSkillTool{
 		Catalog: m.skillCatalog,
 		OnInstalled: func(name string) {
-			// 只注册斜杠命令，系统提示词不动。新装的 Skill 由 skillDelta
-			// 在下一轮以 system-reminder 补进对话。
+			// Only register the slash command; leave the system prompt untouched.
+			// The newly installed skill will be appended by skillDelta in the next
+			// turn via a system-reminder.
 			m.registerSkillCommand(name)
 		},
 	})
@@ -916,9 +919,10 @@ func (m *Model) registerSkillCommand(name string) {
 
 // refreshSkillsIfNeeded checks whether the skill directories have changed
 // since the catalog was last loaded. If so, it reloads the catalog and
-// registers any new slash commands. 系统提示词不动：新增的 Skill 会由
-// skillDelta 在下一轮以 system-reminder 补进对话，改系统提示词会让整段
-// 缓存前缀失效。
+// registers any new slash commands. The system prompt is left untouched:
+// newly added skills are appended by skillDelta in the next turn via a
+// system-reminder — modifying the system prompt would invalidate the entire
+// cache prefix.
 func (m *Model) refreshSkillsIfNeeded() {
 	if m.skillCatalog == nil || m.client == nil {
 		return
@@ -933,8 +937,9 @@ func (m *Model) refreshSkillsIfNeeded() {
 	}
 }
 
-// skillDelta 返回还没通知过模型的 Skill 清单，并把它们记进 announcedSkills。
-// 会话开始时首条 system-reminder 已经带上了全量清单，这里只补后来新增的。
+// skillDelta returns the listing of skills not yet announced to the model and
+// records them in announcedSkills. The first system-reminder at session start
+// already carries the full catalog; this only appends skills added afterwards.
 func (m *Model) skillDelta() string {
 	if m.skillCatalog == nil {
 		return ""
@@ -960,12 +965,15 @@ func (m *Model) skillDelta() string {
 	return strings.Join(lines, "\n")
 }
 
-// rebuildSystemPrompt 构建系统提示词。会话启动时调一次即可，之后不再重建。
+// rebuildSystemPrompt builds the system prompt. It is called once at session
+// start and never rebuilt afterwards.
 //
-// 系统提示词里只放跟项目无关的产品定义（角色、工具用法、行为准则），这样它
-// 全局只有一份，换项目也能继续命中同一份缓存。项目相关的三样东西都不在这里：
-// 指令、自动记忆、Skill 清单由 conversation.InjectLongTermMemory 以
-// system-reminder 注入首条消息，会话中途新增的 Skill 再由 skillDelta 追加。
+// The system prompt contains only project-agnostic product definitions (role,
+// tool usage, behavioral guidelines) so it remains a single global copy with
+// stable cache hits across projects. The three project-scoped items are not here:
+// instructions, auto-memory, and the skill catalog are injected into the first
+// message via conversation.InjectLongTermMemory as a system-reminder, and skills
+// added mid-session are appended by skillDelta.
 func (m *Model) rebuildSystemPrompt(wd string) string {
 	m.instructionsContent = m.loadCustomInstructions(wd)
 	m.memoryContent = memory.LoadAutoMemoryPrompt(wd)
@@ -1796,7 +1804,8 @@ func (m Model) buildCommandContext(args string) *commands.Context {
 			for _, meta := range m.skillCatalog.List() {
 				m.registerSkillCommand(meta.Name)
 			}
-			// 重载后不重建系统提示词，新增的 Skill 走 skillDelta 下一轮补发
+			// Do not rebuild the system prompt after reload; new skills are
+			// appended by skillDelta in the next turn
 			return len(m.skillCatalog.List())
 		},
 		MCPInfo: func() string {

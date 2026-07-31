@@ -107,8 +107,9 @@ func runPrint(userPrompt string, cfg *config.AppConfig, hookConfigs []hooks.Hook
 
 	env := prompt.DetectEnvironment(wd)
 	env.Model = p.Model
-	// 系统提示词只放跟项目无关的产品定义；指令、自动记忆、Skill 清单都跟着
-	// 项目走，由 conversation.InjectLongTermMemory 以 system-reminder 注入对话。
+	// The system prompt contains only project-agnostic product definitions;
+	// instructions, auto-memory, and the skill catalog are project-scoped and
+	// injected into the conversation via conversation.InjectLongTermMemory as a system-reminder.
 	systemPrompt := prompt.BuildSystemPrompt(env)
 
 	client, err := llm.NewClient(p, systemPrompt)

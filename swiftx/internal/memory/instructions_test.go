@@ -64,8 +64,9 @@ func TestLoadInstructionsWalksUp(t *testing.T) {
 	}
 }
 
-// .swiftx/SWIFTX.md 和根目录的 SWIFTX.md 一样参与逐级遍历，
-// 深层目录的那份排在浅层之后，优先级更高。
+// .swiftx/SWIFTX.md participates in the upward directory walk just like the
+// root SWIFTX.md; the deeper directory's copy is ordered after the shallower
+// one and thus has higher priority.
 func TestLoadInstructionsDotDirWalksUp(t *testing.T) {
 	root := t.TempDir()
 	mustInitGit(t, root)
@@ -87,8 +88,8 @@ func TestLoadInstructionsDotDirWalksUp(t *testing.T) {
 	}
 }
 
-// 同一目录下 SWIFTX.md 先于 .swiftx/SWIFTX.md 加载，
-// 后者优先级更高。
+// Within the same directory, SWIFTX.md is loaded before .swiftx/SWIFTX.md;
+// the latter has higher priority.
 func TestLoadInstructionsDotDirAfterPlain(t *testing.T) {
 	dir := t.TempDir()
 	mustInitGit(t, dir)

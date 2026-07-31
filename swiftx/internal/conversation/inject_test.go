@@ -5,8 +5,9 @@ import (
 	"testing"
 )
 
-// 指令、记忆、Skill 清单三样都跟着项目走，必须待在首条 system-reminder 里，
-// 不能进系统提示词，否则每个项目各有一份系统提示词，跨项目缓存全部失效。
+// Instructions, memory, and the skill catalog are all project-scoped and must
+// live in the first system-reminder, not the system prompt — otherwise every
+// project would have its own system prompt and cross-project caching would break.
 func TestInjectLongTermMemoryCarriesSkills(t *testing.T) {
 	m := NewManager()
 	m.AddUserMessage("hello")
@@ -16,7 +17,7 @@ func TestInjectLongTermMemoryCarriesSkills(t *testing.T) {
 	if len(msgs) != 2 {
 		t.Fatalf("want 2 messages, got %d", len(msgs))
 	}
-	// 注入的那条必须排在最前面，位置固定前缀才稳
+	// The injected message must come first so the prefix position stays stable
 	first := msgs[0]
 	if first.Role != "user" {
 		t.Errorf("injected message role = %q, want user", first.Role)
@@ -34,7 +35,7 @@ func TestInjectLongTermMemoryCarriesSkills(t *testing.T) {
 	}
 }
 
-// 一次会话只注入一条，重复调用不叠加。
+// Only one message is injected per session; repeated calls do not stack.
 func TestInjectLongTermMemoryOnlyOnce(t *testing.T) {
 	m := NewManager()
 	m.InjectLongTermMemory("a", "b", "c")
@@ -45,7 +46,7 @@ func TestInjectLongTermMemoryOnlyOnce(t *testing.T) {
 	}
 }
 
-// 三样都为空时不产生噪音消息。
+// No noise message is produced when all three sections are empty.
 func TestInjectLongTermMemorySkipsWhenEmpty(t *testing.T) {
 	m := NewManager()
 	m.InjectLongTermMemory("", "", "")
@@ -55,7 +56,8 @@ func TestInjectLongTermMemorySkipsWhenEmpty(t *testing.T) {
 	}
 }
 
-// 只有 Skill 清单时也要注入，因为项目可能没写 SWIFTX.md 也没有记忆。
+// The skill catalog alone still triggers injection, since a project may have
+// no SWIFTX.md and no memory.
 func TestInjectLongTermMemorySkillsOnly(t *testing.T) {
 	m := NewManager()
 	m.InjectLongTermMemory("", "", "- /review: review code")

@@ -255,9 +255,10 @@ func (s *Server) initAgent() error {
 
 	env := prompt.DetectEnvironment(wd)
 	env.Model = p.Model
-	// 系统提示词只放跟项目无关的产品定义，这样它全局一份、缓存能一直命中。
-	// 指令、自动记忆和 Skill 清单都跟着项目走，由
-	// conversation.InjectLongTermMemory 以 system-reminder 注入首条消息。
+	// The system prompt contains only project-agnostic product definitions so it
+	// remains a single global copy with stable cache hits. Instructions, auto-memory,
+	// and the skill catalog are project-scoped and injected into the first message
+	// via conversation.InjectLongTermMemory as a system-reminder.
 	systemPrompt := prompt.BuildSystemPrompt(env)
 
 	client, err := llm.NewClient(p, systemPrompt)

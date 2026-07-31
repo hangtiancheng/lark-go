@@ -119,8 +119,8 @@ func runTeammate(args teammateArgs) error {
 		cancel()
 	}()
 
-	// Skill 清单随首条 system-reminder 注入对话（见下面的 ag.SkillSection），
-	// 同时挂到 LoadSkill 工具上供模型按名字加载。
+	// The skill catalog is injected into the conversation via the first system-reminder
+	// (see ag.SkillSection below) and also attached to the LoadSkill tool for on-demand loading.
 	skillCatalog := skills.LoadCatalog(wd)
 	env := prompt.DetectEnvironment(wd)
 	env.Model = provider.Model

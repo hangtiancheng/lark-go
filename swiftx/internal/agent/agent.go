@@ -73,11 +73,14 @@ type Agent struct {
 	// Mode on or off (e.g., when a team is created/torn down) without restarting the agent.
 	Instructions  string
 	MemoryContent string
-	// SkillSection 是可用 Skill 的清单文本。它跟着项目走，所以不进系统提示词，
-	// 而是和指令、记忆一起放进首条 system-reminder。
+	// SkillSection is the listing text of available skills. It is project-scoped,
+	// so it goes into the first system-reminder alongside instructions and memory
+	// rather than the system prompt.
 	SkillSection string
-	// SkillDeltaFn 返回本轮新出现的 Skill 清单（已通知过的不再返回）。
-	// 会话中途装了新 Skill 时只补这几条，不重发整份清单，也不动系统提示词。
+	// SkillDeltaFn returns the listing of skills newly appeared since the last call
+	// (previously announced ones are omitted). When skills are installed mid-session,
+	// only the new entries are appended — the full listing is not resent and the
+	// system prompt is left untouched.
 	SkillDeltaFn func() string
 	// MemoryRecallCh is a non-blocking memory recall channel: prefetch runs in
 	// parallel with the main LLM call; the result is read and injected after
@@ -233,8 +236,9 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 
 			a.emitHook(hooks.EventTurnStart, "", nil)
 
-			// 会话中途新增的 Skill：只补新出现的那几条，不重发整份清单，
-			// 更不动系统提示词，避免把缓存前缀顶掉。
+			// Skills added mid-session: only append the newly appeared entries,
+			// without resending the full listing or touching the system prompt,
+			// to avoid invalidating the cache prefix.
 			if a.SkillDeltaFn != nil {
 				if delta := a.SkillDeltaFn(); delta != "" {
 					conv.AddSystemReminder("The following skills became available:\n" + delta)

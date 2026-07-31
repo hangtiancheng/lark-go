@@ -150,8 +150,8 @@ func getToolResults(events []AgentEvent) []ToolResultEvent {
 	return results
 }
 
-// buildSkillListing 生成 Skill 清单文本。它随首条 system-reminder 注入对话，
-// 不进系统提示词（见 Agent.SkillSection）。
+// buildSkillListing generates the skill catalog text. It is injected into the
+// conversation via the first system-reminder, not the system prompt (see Agent.SkillSection).
 func buildSkillListing(skillsDir string, catalog *skills.Catalog) string {
 	var sb strings.Builder
 	sb.WriteString("## Available Skills\n\n")

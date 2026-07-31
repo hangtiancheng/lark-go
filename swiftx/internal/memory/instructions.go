@@ -87,7 +87,7 @@ func DiscoverInstructions(workDir string) []InstructionSource {
 	for _, dir := range projectInstructionDirs(workDir) {
 		add(&sources, seen, filepath.Join(dir, "SWIFTX.md"), projectRoot)
 		add(&sources, seen, filepath.Join(dir, "AGENTS.md"), projectRoot)
-		// .swiftx/ 下的同名文件：想让指令进 .gitignore 的项目放这里
+		// Same-named file under .swiftx/: for projects that gitignore their instructions
 		add(&sources, seen, filepath.Join(dir, ".swiftx", "SWIFTX.md"), projectRoot)
 	}
 	add(&sources, seen, filepath.Join(workDir, "SWIFTX.local.md"), projectRoot)
