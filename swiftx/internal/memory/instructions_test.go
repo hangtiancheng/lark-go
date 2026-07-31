@@ -36,7 +36,7 @@ func TestLoadInstructionsBasic(t *testing.T) {
 	mustWrite(t, filepath.Join(dir, ".swiftx", "SWIFTX.md"), "dotdir instructions")
 
 	out := LoadInstructions(dir)
-	for _, want := range []string{"root swiftx rules", "root agents rules", "legacy instructions"} {
+	for _, want := range []string{"root swiftx rules", "root agents rules", "dotdir instructions"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in output:\n%s", want, out)
 		}

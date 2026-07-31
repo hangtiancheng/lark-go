@@ -160,8 +160,8 @@ func TestLiveFrontendDesignSkill(t *testing.T) {
 		t.Skip("frontend-design skill not installed")
 	}
 
-	systemPrompt := buildSkillSystemPrompt(skillsDir, catalog)
-	client, err := llm.NewClient(providerCfg, systemPrompt)
+	skillListing := buildSkillListing(skillsDir, catalog)
+	client, err := llm.NewClient(providerCfg, skillListing)
 	if err != nil {
 		t.Fatalf("failed to create LLM client: %v", err)
 	}
@@ -286,8 +286,8 @@ func TestLiveSkillCreatorOutputPath(t *testing.T) {
 	testSkillsDir := filepath.Join(workDir, ".swiftx", "skills")
 	os.MkdirAll(testSkillsDir, 0o755)
 
-	systemPrompt := buildSkillSystemPrompt(testSkillsDir, catalog)
-	client, err := llm.NewClient(providerCfg, systemPrompt)
+	skillListing := buildSkillListing(testSkillsDir, catalog)
+	client, err := llm.NewClient(providerCfg, skillListing)
 	if err != nil {
 		t.Fatalf("failed to create LLM client: %v", err)
 	}
@@ -365,8 +365,8 @@ func TestLiveSimpleChat(t *testing.T) {
 	providerCfg := loadRealConfig(t)
 
 	env := prompt.DetectEnvironment(".")
-	systemPrompt := prompt.BuildSystemPrompt(env, prompt.BuildOptions{})
-	client, err := llm.NewClient(providerCfg, systemPrompt)
+	skillListing := prompt.BuildSystemPrompt(env)
+	client, err := llm.NewClient(providerCfg, skillListing)
 	if err != nil {
 		t.Fatalf("failed to create client: %v", err)
 	}
