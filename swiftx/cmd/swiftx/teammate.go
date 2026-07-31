@@ -119,15 +119,12 @@ func runTeammate(args teammateArgs) error {
 		cancel()
 	}()
 
-	// The skill catalog serves two purposes: it goes into the system prompt so
-	// the model knows which skills are available, and it backs the LoadSkill
-	// tool so the model can load a skill by name.
+	// Skill 清单随首条 system-reminder 注入对话（见下面的 ag.SkillSection），
+	// 同时挂到 LoadSkill 工具上供模型按名字加载。
 	skillCatalog := skills.LoadCatalog(wd)
 	env := prompt.DetectEnvironment(wd)
 	env.Model = provider.Model
-	systemPrompt := prompt.BuildSystemPrompt(env, prompt.BuildOptions{
-		SkillSection: buildPrintSkillSection(skillCatalog),
-	})
+	systemPrompt := prompt.BuildSystemPrompt(env)
 
 	client, err := llm.NewClient(&provider, systemPrompt)
 	if err != nil {
@@ -158,6 +155,7 @@ func runTeammate(args teammateArgs) error {
 	})
 
 	member := team.AddMember(args.memberName, client, registry, provider.Protocol)
+	member.AgentRef.SkillSection = buildPrintSkillSection(skillCatalog)
 
 	// The teammate's own Agent acts as the host for the skill tools, so they can
 	// only be wired in after AddMember has built the Agent. With no ForkHost,

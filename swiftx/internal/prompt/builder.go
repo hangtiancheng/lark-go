@@ -46,12 +46,6 @@ type EnvironmentContext struct {
 	Date      string
 }
 
-type BuildOptions struct {
-	// SkillSection holds skill descriptions injected into the system prompt.
-	// Project instructions and auto-memory are delivered separately by
-	// conversation.InjectLongTermMemory as system-reminder messages.
-	SkillSection string
-}
 type Builder struct {
 	sections []Section
 }
@@ -103,7 +97,7 @@ func DetectEnvironment(workDir string) EnvironmentContext {
 	return env
 }
 
-func BuildSystemPrompt(env EnvironmentContext, opts BuildOptions) string {
+func BuildSystemPrompt(env EnvironmentContext) string {
 	b := NewBuilder()
 
 	b.Add(IdentitySection())
@@ -114,15 +108,5 @@ func BuildSystemPrompt(env EnvironmentContext, opts BuildOptions) string {
 	b.Add(ToneStyleSection())
 	b.Add(OutputEfficiencySection())
 	b.Add(EnvironmentSection(env))
-
-	// Skill descriptions (priority 90, placed after fixed sections)
-
-	if opts.SkillSection != "" {
-		b.Add(Section{
-			Name:     "Skills",
-			Priority: 90,
-			Content:  opts.SkillSection,
-		})
-	}
 	return b.Build()
 }

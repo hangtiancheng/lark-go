@@ -32,7 +32,6 @@ import (
 
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/conversation"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/llm"
-	"github.com/hangtiancheng/swifty.go/swiftx/internal/prompt"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/skills"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/tools"
 )
@@ -151,7 +150,9 @@ func getToolResults(events []AgentEvent) []ToolResultEvent {
 	return results
 }
 
-func buildSkillSystemPrompt(skillsDir string, catalog *skills.Catalog) string {
+// buildSkillListing 生成 Skill 清单文本。它随首条 system-reminder 注入对话，
+// 不进系统提示词（见 Agent.SkillSection）。
+func buildSkillListing(skillsDir string, catalog *skills.Catalog) string {
 	var sb strings.Builder
 	sb.WriteString("## Available Skills\n\n")
 	fmt.Fprintf(&sb, "Skills are installed at: %s\n", skillsDir)
@@ -164,8 +165,7 @@ func buildSkillSystemPrompt(skillsDir string, catalog *skills.Catalog) string {
 		}
 		fmt.Fprintf(&sb, "- /%s: %s\n", meta.Name, desc)
 	}
-	env := prompt.DetectEnvironment(".")
-	return prompt.BuildSystemPrompt(env, prompt.BuildOptions{SkillSection: sb.String()})
+	return sb.String()
 }
 
 // runConversationRound simulates what the TUI does for one user message:
@@ -575,7 +575,7 @@ The full path should be .swiftx/skills/<skill-name>/SKILL.md.
 `), 0o644)
 
 	catalog, _ := skills.LoadFromDirectory(skillsDir)
-	systemPrompt := buildSkillSystemPrompt(skillsDir, catalog)
+	skillListing := buildSkillListing(skillsDir, catalog)
 	skill := catalog.Get("skill-creator")
 
 	newSkillDir := filepath.Join(skillsDir, "git-helper")
@@ -647,7 +647,7 @@ Help the user with git operations:
 	conv := conversation.NewManager()
 
 	// Verify system prompt tells agent where to put skills
-	if !strings.Contains(systemPrompt, skillsDir) {
+	if !strings.Contains(skillListing, skillsDir) {
 		t.Fatalf("system prompt missing skills dir: %s", skillsDir)
 	}
 
@@ -860,14 +860,14 @@ func TestRealSkillsLoadAndRunSimulation(t *testing.T) {
 	metas := catalog.List()
 	t.Logf("Loaded %d real skills", len(metas))
 
-	systemPrompt := buildSkillSystemPrompt(skillsDir, catalog)
+	skillListing := buildSkillListing(skillsDir, catalog)
 
 	// Verify system prompt structure
-	if !strings.Contains(systemPrompt, "Skills are installed at:") {
+	if !strings.Contains(skillListing, "Skills are installed at:") {
 		t.Error("system prompt missing skill path")
 	}
 	for _, meta := range metas {
-		if !strings.Contains(systemPrompt, "/"+meta.Name) {
+		if !strings.Contains(skillListing, "/"+meta.Name) {
 			t.Errorf("system prompt missing /%s", meta.Name)
 		}
 	}

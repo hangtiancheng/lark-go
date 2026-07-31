@@ -41,10 +41,10 @@ type InstructionSource struct {
 //
 // Discovery order (each later layer is appended later, so model attention prioritises it):
 //  1. User global: ~/.swiftx/SWIFTX.md, ~/.swiftx/AGENTS.md
-//  2. Project: walk from git root down to workDir, picking up SWIFTX.md
-//     and AGENTS.md in each directory (so the file closest to cwd wins)
-//  3. workDir/.swiftx/INSTRUCTIONS.md (legacy)
-//  4. workDir/SWIFTX.local.md (private local override)
+//  2. Project: walk from git root down to workDir, picking up SWIFTX.md,
+//     AGENTS.md and .swiftx/SWIFTX.md in each directory (so the file
+//     closest to cwd wins)
+//  3. workDir/SWIFTX.local.md (private local override)
 //
 // @-include directives:
 //   - @./relative/path, @~/home/path, or @/absolute/path
@@ -87,8 +87,9 @@ func DiscoverInstructions(workDir string) []InstructionSource {
 	for _, dir := range projectInstructionDirs(workDir) {
 		add(&sources, seen, filepath.Join(dir, "SWIFTX.md"), projectRoot)
 		add(&sources, seen, filepath.Join(dir, "AGENTS.md"), projectRoot)
+		// .swiftx/ 下的同名文件：想让指令进 .gitignore 的项目放这里
+		add(&sources, seen, filepath.Join(dir, ".swiftx", "SWIFTX.md"), projectRoot)
 	}
-	add(&sources, seen, filepath.Join(workDir, ".swiftx", "INSTRUCTIONS.md"), projectRoot)
 	add(&sources, seen, filepath.Join(workDir, "SWIFTX.local.md"), projectRoot)
 	return sources
 }

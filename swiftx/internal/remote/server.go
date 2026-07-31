@@ -255,11 +255,10 @@ func (s *Server) initAgent() error {
 
 	env := prompt.DetectEnvironment(wd)
 	env.Model = p.Model
-	// Instructions and auto-memory are injected by conversation.InjectLongTermMemory
-	// as system-reminder messages; the system prompt only carries Skills here.
-	systemPrompt := prompt.BuildSystemPrompt(env, prompt.BuildOptions{
-		SkillSection: skillSection,
-	})
+	// 系统提示词只放跟项目无关的产品定义，这样它全局一份、缓存能一直命中。
+	// 指令、自动记忆和 Skill 清单都跟着项目走，由
+	// conversation.InjectLongTermMemory 以 system-reminder 注入首条消息。
+	systemPrompt := prompt.BuildSystemPrompt(env)
 
 	client, err := llm.NewClient(p, systemPrompt)
 	if err != nil {
@@ -280,6 +279,7 @@ func (s *Server) initAgent() error {
 	ag.MaxOutputTokens = p.GetMaxOutputTokens()
 	ag.Instructions = s.instructionsContent
 	ag.MemoryContent = s.memoryContent
+	ag.SkillSection = skillSection
 	ag.FileHistory = s.fileHistory
 	ag.SetSessionID(s.sessionID)
 

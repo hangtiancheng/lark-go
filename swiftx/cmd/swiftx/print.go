@@ -93,7 +93,7 @@ func parsePrintFlags(args []string) (string, string, bool) {
 	return prompt, outputFormat, isPrint
 }
 
-func runPrint(userPrompt string, cfg *config.AppConfig, hookCfgs []hooks.Hook, outputFormat string) error {
+func runPrint(userPrompt string, cfg *config.AppConfig, hookConfigs []hooks.Hook, outputFormat string) error {
 	p := &cfg.Providers[0]
 	wd, _ := os.Getwd()
 
@@ -107,11 +107,9 @@ func runPrint(userPrompt string, cfg *config.AppConfig, hookCfgs []hooks.Hook, o
 
 	env := prompt.DetectEnvironment(wd)
 	env.Model = p.Model
-	// Instructions and auto-memory are injected by conversation.InjectLongTermMemory
-	// as system-reminder messages; the system prompt only carries Skills here.
-	systemPrompt := prompt.BuildSystemPrompt(env, prompt.BuildOptions{
-		SkillSection: skillSection,
-	})
+	// 系统提示词只放跟项目无关的产品定义；指令、自动记忆、Skill 清单都跟着
+	// 项目走，由 conversation.InjectLongTermMemory 以 system-reminder 注入对话。
+	systemPrompt := prompt.BuildSystemPrompt(env)
 
 	client, err := llm.NewClient(p, systemPrompt)
 	if err != nil {
@@ -166,6 +164,7 @@ func runPrint(userPrompt string, cfg *config.AppConfig, hookCfgs []hooks.Hook, o
 	ag.MaxOutputTokens = p.GetMaxOutputTokens()
 	ag.Instructions = instructionsContent
 	ag.MemoryContent = memoryContent
+	ag.SkillSection = skillSection
 	ag.FileHistory = fh
 	ag.SetSessionID(sessionID)
 
@@ -180,9 +179,9 @@ func runPrint(userPrompt string, cfg *config.AppConfig, hookCfgs []hooks.Hook, o
 		permissions.ModeBypass,
 	)
 
-	if len(hookCfgs) > 0 {
+	if len(hookConfigs) > 0 {
 		eng := hooks.NewEngine()
-		eng.LoadHooks(hookCfgs)
+		eng.LoadHooks(hookConfigs)
 		ag.Hooks = eng
 	}
 

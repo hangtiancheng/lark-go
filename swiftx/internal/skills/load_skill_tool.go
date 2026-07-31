@@ -49,7 +49,7 @@ func (t *LoadSkillTool) Category() tools.ToolCategory { return tools.CategoryRea
 func (t *LoadSkillTool) Description() string {
 	return "Activate a Skill by name. Returns the full SOP body so you can follow its " +
 		"instructions. Call this when the user's request matches one of the available " +
-		"Skills listed in the system prompt. Pass the Skill name without a leading slash."
+		"Skills listed in the available-skills section. Pass the Skill name without a leading slash."
 }
 
 func (t *LoadSkillTool) Schema() map[string]any {

@@ -73,6 +73,12 @@ type Agent struct {
 	// Mode on or off (e.g., when a team is created/torn down) without restarting the agent.
 	Instructions  string
 	MemoryContent string
+	// SkillSection 是可用 Skill 的清单文本。它跟着项目走，所以不进系统提示词，
+	// 而是和指令、记忆一起放进首条 system-reminder。
+	SkillSection string
+	// SkillDeltaFn 返回本轮新出现的 Skill 清单（已通知过的不再返回）。
+	// 会话中途装了新 Skill 时只补这几条，不重发整份清单，也不动系统提示词。
+	SkillDeltaFn func() string
 	// MemoryRecallCh is a non-blocking memory recall channel: prefetch runs in
 	// parallel with the main LLM call; the result is read and injected after
 	// tool execution completes.
@@ -180,7 +186,7 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 
 		a.emitHook(hooks.EventSessionStart, "", nil)
 
-		conv.InjectLongTermMemory(a.Instructions, a.MemoryContent)
+		conv.InjectLongTermMemory(a.Instructions, a.MemoryContent, a.SkillSection)
 
 		var totalInput, totalOutput int
 		maxTokensEscalated := false
@@ -227,6 +233,14 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 
 			a.emitHook(hooks.EventTurnStart, "", nil)
 
+			// 会话中途新增的 Skill：只补新出现的那几条，不重发整份清单，
+			// 更不动系统提示词，避免把缓存前缀顶掉。
+			if a.SkillDeltaFn != nil {
+				if delta := a.SkillDeltaFn(); delta != "" {
+					conv.AddSystemReminder("The following skills became available:\n" + delta)
+				}
+			}
+
 			// Inject deferred tool names into system-reminder so the model knows what's available via
 			// ToolSearch.
 			if deferredNames := a.Registry.GetDeferredToolNames(); len(deferredNames) > 0 {
@@ -242,7 +256,7 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 			if msg, err := compact.ManageContext(ctx, conv, a.Client, a.WorkDir, a.SessionID, a.ContextWindow, a.MaxOutputTokens, &a.compactTracking, a.RecoveryState, toolSchemas); err == nil && msg != "" {
 				ch <- CompactEvent{Message: msg}
 				conv.ClearUsageAnchor()
-				conv.InjectLongTermMemory(a.Instructions, a.MemoryContent)
+				conv.InjectLongTermMemory(a.Instructions, a.MemoryContent, a.SkillSection)
 			}
 
 			events, errs := a.Client.Stream(ctx, conv, toolSchemas)
@@ -298,7 +312,7 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 					if retry, compacted := a.handleStreamError(ctx, ch, conv, err); retry {
 						if compacted {
 							conv.ClearUsageAnchor()
-							conv.InjectLongTermMemory(a.Instructions, a.MemoryContent)
+							conv.InjectLongTermMemory(a.Instructions, a.MemoryContent, a.SkillSection)
 						}
 						continue // retry the turn
 					}

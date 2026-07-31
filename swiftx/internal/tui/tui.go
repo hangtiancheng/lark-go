@@ -230,6 +230,9 @@ type Model struct {
 	askUserOnSubmit    bool
 	askUserSubmitIdx   int
 	skillCatalog       *skills.Catalog
+	// announcedSkills 记录已经告诉过模型的 Skill 名字。会话首条 system-reminder
+	// 带的是全量清单，之后只补新增的，避免重复占用上下文。
+	announcedSkills    map[string]bool
 	taskMgr            *subagent.TaskManager
 	todoList           *todo.TaskList
 	memoryMgr          *memory.Manager
@@ -454,6 +457,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		ag.MaxOutputTokens = p.GetMaxOutputTokens()
 		ag.Instructions = m.instructionsContent
 		ag.MemoryContent = m.memoryContent
+		// 首条 system-reminder 带全量 Skill 清单，之后由 SkillDeltaFn 只补新增的
+		ag.SkillSection = m.skillDelta()
+		ag.SkillDeltaFn = m.skillDelta
 		ag.FileHistory = m.fileHistory
 		ag.SetSessionID(m.sessionID)
 		sandboxAllow := []string{memory.GetAutoMemPath(wd)}
@@ -847,11 +853,9 @@ func (m *Model) wireSkillsToAgent() {
 	m.registry.Register(&skills.InstallSkillTool{
 		Catalog: m.skillCatalog,
 		OnInstalled: func(name string) {
+			// 只注册斜杠命令，系统提示词不动。新装的 Skill 由 skillDelta
+			// 在下一轮以 system-reminder 补进对话。
 			m.registerSkillCommand(name)
-			if m.client != nil {
-				wd, _ := os.Getwd()
-				m.client.SetSystemPrompt(m.rebuildSystemPrompt(wd))
-			}
 		},
 	})
 }
@@ -911,9 +915,10 @@ func (m *Model) registerSkillCommand(name string) {
 }
 
 // refreshSkillsIfNeeded checks whether the skill directories have changed
-// since the catalog was last loaded. If so, it reloads the catalog, registers
-// any new slash commands, and updates the LLM client's system prompt so the
-// model sees newly-added skills.
+// since the catalog was last loaded. If so, it reloads the catalog and
+// registers any new slash commands. 系统提示词不动：新增的 Skill 会由
+// skillDelta 在下一轮以 system-reminder 补进对话，改系统提示词会让整段
+// 缓存前缀失效。
 func (m *Model) refreshSkillsIfNeeded() {
 	if m.skillCatalog == nil || m.client == nil {
 		return
@@ -926,25 +931,49 @@ func (m *Model) refreshSkillsIfNeeded() {
 	for _, meta := range m.skillCatalog.List() {
 		m.registerSkillCommand(meta.Name)
 	}
-	m.client.SetSystemPrompt(m.rebuildSystemPrompt(wd))
 }
 
-// rebuildSystemPrompt regenerates the full system prompt from current state
-// (skills, custom instructions, memory). Used by refreshSkillsIfNeeded and
-// /skill reload.
+// skillDelta 返回还没通知过模型的 Skill 清单，并把它们记进 announcedSkills。
+// 会话开始时首条 system-reminder 已经带上了全量清单，这里只补后来新增的。
+func (m *Model) skillDelta() string {
+	if m.skillCatalog == nil {
+		return ""
+	}
+	if m.announcedSkills == nil {
+		m.announcedSkills = map[string]bool{}
+	}
+	var lines []string
+	for _, meta := range m.skillCatalog.List() {
+		if m.announcedSkills[meta.Name] {
+			continue
+		}
+		m.announcedSkills[meta.Name] = true
+		desc := meta.Description
+		if len(desc) > 200 {
+			desc = desc[:200] + "…"
+		}
+		lines = append(lines, fmt.Sprintf("- /%s: %s", meta.Name, desc))
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n")
+}
+
+// rebuildSystemPrompt 构建系统提示词。会话启动时调一次即可，之后不再重建。
+//
+// 系统提示词里只放跟项目无关的产品定义（角色、工具用法、行为准则），这样它
+// 全局只有一份，换项目也能继续命中同一份缓存。项目相关的三样东西都不在这里：
+// 指令、自动记忆、Skill 清单由 conversation.InjectLongTermMemory 以
+// system-reminder 注入首条消息，会话中途新增的 Skill 再由 skillDelta 追加。
 func (m *Model) rebuildSystemPrompt(wd string) string {
-	skillSection := m.buildSkillSection(wd)
 	m.instructionsContent = m.loadCustomInstructions(wd)
 	m.memoryContent = memory.LoadAutoMemoryPrompt(wd)
 	env := prompt.DetectEnvironment(wd)
 	if m.selectedProvider != nil {
 		env.Model = m.selectedProvider.Model
 	}
-	// Instructions and auto-memory are injected by conversation.InjectLongTermMemory
-	// as system-reminder messages; the system prompt only carries Skills here.
-	return prompt.BuildSystemPrompt(env, prompt.BuildOptions{
-		SkillSection: skillSection,
-	})
+	return prompt.BuildSystemPrompt(env)
 }
 
 // buildSkillSection generates the "## Available Skills" prompt section from
@@ -1282,6 +1311,8 @@ func (m Model) handleProviderSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		ag.MaxOutputTokens = p.GetMaxOutputTokens()
 		ag.Instructions = m.instructionsContent
 		ag.MemoryContent = m.memoryContent
+		ag.SkillSection = m.skillDelta()
+		ag.SkillDeltaFn = m.skillDelta
 		ag.FileHistory = m.fileHistory
 		ag.SetSessionID(m.sessionID)
 		sandboxAllow := []string{memory.GetAutoMemPath(wd)}
@@ -1765,9 +1796,7 @@ func (m Model) buildCommandContext(args string) *commands.Context {
 			for _, meta := range m.skillCatalog.List() {
 				m.registerSkillCommand(meta.Name)
 			}
-			if m.client != nil {
-				m.client.SetSystemPrompt(m.rebuildSystemPrompt(wd))
-			}
+			// 重载后不重建系统提示词，新增的 Skill 走 skillDelta 下一轮补发
 			return len(m.skillCatalog.List())
 		},
 		MCPInfo: func() string {

@@ -33,7 +33,7 @@ func TestLoadInstructionsBasic(t *testing.T) {
 
 	mustWrite(t, filepath.Join(dir, "SWIFTX.md"), "root swiftx rules")
 	mustWrite(t, filepath.Join(dir, "AGENTS.md"), "root agents rules")
-	mustWrite(t, filepath.Join(dir, ".swiftx", "INSTRUCTIONS.md"), "legacy instructions")
+	mustWrite(t, filepath.Join(dir, ".swiftx", "SWIFTX.md"), "dotdir instructions")
 
 	out := LoadInstructions(dir)
 	for _, want := range []string{"root swiftx rules", "root agents rules", "legacy instructions"} {
@@ -61,6 +61,48 @@ func TestLoadInstructionsWalksUp(t *testing.T) {
 	}
 	if rootIdx >= leafIdx {
 		t.Errorf("leaf file should be ordered after root (higher priority); root=%d leaf=%d", rootIdx, leafIdx)
+	}
+}
+
+// .swiftx/SWIFTX.md 和根目录的 SWIFTX.md 一样参与逐级遍历，
+// 深层目录的那份排在浅层之后，优先级更高。
+func TestLoadInstructionsDotDirWalksUp(t *testing.T) {
+	root := t.TempDir()
+	mustInitGit(t, root)
+	sub := filepath.Join(root, "pkg", "deep")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustWrite(t, filepath.Join(root, ".swiftx", "SWIFTX.md"), "dotdir from root")
+	mustWrite(t, filepath.Join(sub, ".swiftx", "SWIFTX.md"), "dotdir from leaf")
+
+	out := LoadInstructions(sub)
+	rootIdx := strings.Index(out, "dotdir from root")
+	leafIdx := strings.Index(out, "dotdir from leaf")
+	if rootIdx == -1 || leafIdx == -1 {
+		t.Fatalf("both .swiftx files should appear; got:\n%s", out)
+	}
+	if rootIdx >= leafIdx {
+		t.Errorf("leaf .swiftx file should be ordered after root; root=%d leaf=%d", rootIdx, leafIdx)
+	}
+}
+
+// 同一目录下 SWIFTX.md 先于 .swiftx/SWIFTX.md 加载，
+// 后者优先级更高。
+func TestLoadInstructionsDotDirAfterPlain(t *testing.T) {
+	dir := t.TempDir()
+	mustInitGit(t, dir)
+	mustWrite(t, filepath.Join(dir, "SWIFTX.md"), "plain file")
+	mustWrite(t, filepath.Join(dir, ".swiftx", "SWIFTX.md"), "dotdir file")
+
+	out := LoadInstructions(dir)
+	plainIdx := strings.Index(out, "plain file")
+	dotIdx := strings.Index(out, "dotdir file")
+	if plainIdx == -1 || dotIdx == -1 {
+		t.Fatalf("both files should appear; got:\n%s", out)
+	}
+	if plainIdx >= dotIdx {
+		t.Errorf(".swiftx file should be ordered after the plain one; plain=%d dot=%d", plainIdx, dotIdx)
 	}
 }
 
