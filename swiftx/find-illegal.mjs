@@ -20,11 +20,7 @@ import { basename, resolve } from "node:path";
  *   (project names swifty_http and swifty.go are allowed).
  * @type {RegExp[]}
  */
-const ILLEGAL_PATTERNS = [
-  /Swifty/g,
-  /SWIFTY/g,
-  /swifty(?!_http\b|\.go\b)/g,
-];
+const ILLEGAL_PATTERNS = [/Swifty/g, /SWIFTY/g, /swifty(?!_http\b|\.go\b)/g];
 
 /**
  * Retrieve all git-tracked files under the current working directory.

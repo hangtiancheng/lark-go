@@ -21,7 +21,6 @@
  * SOFTWARE.
  */
 
-
 /**
  * Release build script for the Swiftx CLI.
  *
