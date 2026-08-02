@@ -21,7 +21,6 @@
  * SOFTWARE.
  */
 
-
 /**
  * @module update
  * @description Go Workspace dependency updater.

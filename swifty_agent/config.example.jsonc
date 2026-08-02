@@ -19,7 +19,7 @@
     "model": "deepseek-v3-2-251201",
     "max_tokens": 4096,
     // Anthropic extended thinking (only effective when model_provider=anthropic)
-    "thinking": false
+    "thinking": false,
   },
   // ---- Quick Model (chat/tool execution) ----
   "quick_chat_model": {
@@ -30,7 +30,7 @@
     "model": "deepseek-v3-2-251201",
     "max_tokens": 4096,
     // Anthropic extended thinking (only effective when model_provider=anthropic)
-    "thinking": false
+    "thinking": false,
   },
   // ---- Embedding ----
   "embedding_model": {
@@ -40,7 +40,7 @@
     "model": "text-embedding-v4",
     "dimensions": 2048,
     "ollama_base_url": "http://localhost:11434",
-    "ollama_model": "nomic-embed-text"
+    "ollama_model": "nomic-embed-text",
   },
   // ---- File Upload Directory ----
   "file_dir": "./data/docs",
@@ -57,8 +57,8 @@
   "redis": {
     "addr": "localhost:6379",
     "password": "",
-    "db": 0
-  }
+    "db": 0,
+  },
 }
 
 // The following are constants (aligned with Next.js); to change them, edit internal/consts/consts.go

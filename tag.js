@@ -64,7 +64,9 @@ function run(command) {
   console.log(`> ${command.join(" ")}`);
   const result = spawnSync(command[0], command.slice(1), { stdio: "inherit" });
   if (result.status !== 0) {
-    throw new Error(`Command failed: ${command.join(" ")} (exit ${result.status ?? "?"})`);
+    throw new Error(
+      `Command failed: ${command.join(" ")} (exit ${result.status ?? "?"})`,
+    );
   }
 }
 
@@ -139,7 +141,9 @@ function main(versions) {
     if (!raw) continue;
     const ver = normalizeVersion(raw);
     if (!isValidVersion(ver)) {
-      throw new Error(`invalid version for ${key}: "${raw}" (expected [v]X.Y.Z)`);
+      throw new Error(
+        `invalid version for ${key}: "${raw}" (expected [v]X.Y.Z)`,
+      );
     }
     const tag = `${mod}/${ver}`;
     run(["git", "tag", tag]);
@@ -176,7 +180,9 @@ function parseArgs(argv) {
     }
     const [, key, ver] = m;
     if (!(key in MODULES)) {
-      console.error(`unknown module: ${key} (expected: ${Object.keys(MODULES).join(", ")})`);
+      console.error(
+        `unknown module: ${key} (expected: ${Object.keys(MODULES).join(", ")})`,
+      );
       process.exit(1);
     }
     versions[/** @type {keyof Versions} */ (key)] = ver;
@@ -184,8 +190,18 @@ function parseArgs(argv) {
   return versions;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+if (
+  process.argv[1] &&
+  fileURLToPath(import.meta.url) === path.resolve(process.argv[1])
+) {
   main(parseArgs(process.argv));
 }
 
-export { main, parseArgs, normalizeVersion, isValidVersion, readPackageVersion, MODULES };
+export {
+  main,
+  parseArgs,
+  normalizeVersion,
+  isValidVersion,
+  readPackageVersion,
+  MODULES,
+};

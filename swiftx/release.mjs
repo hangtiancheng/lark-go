@@ -24,18 +24,15 @@
 /**
  * GitHub Release publish script for the Swiftx CLI.
  *
- * Builds all targets (via build.mjs), then creates the release
- * `swiftx-v<version>` on github.com/hangtiancheng/swifty.go and uploads the
- * binaries from ./build as release assets. If the release already exists,
- * assets are uploaded with --clobber.
+ * Builds all targets (via build.mjs), then creates the release `swiftx` on
+ * github.com/hangtiancheng/swifty.go and uploads the binaries from ./build as
+ * release assets. If the release already exists, assets are uploaded with
+ * --clobber.
  *
  * Requires the GitHub CLI (`gh`) to be installed and authenticated.
  *
  * Usage:
- *   node release.mjs <version> [--skip-build]
- *
- * Example:
- *   node release.mjs 0.0.4
+ *   node release.mjs [--skip-build]
  */
 
 import { spawnSync } from "node:child_process";
@@ -105,17 +102,6 @@ function check(command, args) {
 
 const args = process.argv.slice(2);
 const skipBuild = args.includes("--skip-build");
-const rawVersion = args.find((a) => !a.startsWith("--"));
-
-if (!rawVersion) {
-  fail("usage: node release.mjs <version> [--skip-build]");
-}
-const version = rawVersion.replace(/^v/, "");
-if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z-.]+)?$/.test(version)) {
-  fail(
-    `invalid version "${rawVersion}" (expected semver, e.g. 0.0.1 or v0.0.1)`,
-  );
-}
 
 if (!check("gh", ["--version"])) {
   fail(
@@ -159,7 +145,7 @@ if (extra.length > 0) {
   );
 }
 
-const tag = `swiftx-v${version}`;
+const tag = "swiftx";
 const assets = EXPECTED_ASSETS.map((name) => join(buildDir, name));
 
 if (check("gh", ["release", "view", tag, "--repo", REPO])) {

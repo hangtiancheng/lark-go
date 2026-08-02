@@ -2,11 +2,11 @@
   "folders": [
     {
       "name": "swifty.go",
-      "path": "./swifty_cli"
+      "path": "./swifty_cli",
     },
     {
       "name": "swifty-agent",
-      "path": "../swifty-cli/apps/swifty-agent"
-    }
-  ]
+      "path": "../swifty-cli/apps/swifty-agent",
+    },
+  ],
 }

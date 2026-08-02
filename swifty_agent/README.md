@@ -1,6 +1,6 @@
 # Swifty Agent
 
-*Author: Swifty*
+_Author: Swifty_
 
 A Go-based AI-powered intelligent operations assistant, migrated from the Next.js project (`swifty-cli/apps/swifty-agent`). Provides RAG-enhanced conversations, knowledge base indexing, and automated alert analysis capabilities, built with the [swifty_http](../swifty_http) framework and [Eino](https://www.cloudwego.io/docs/eino/) AI orchestration.
 
