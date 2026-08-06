@@ -58,23 +58,34 @@ var (
 type UpgradeOptions struct {
 	ReadBufferSize  int
 	WriteBufferSize int
-	CheckOrigin     func(r *http.Request) bool
-	Subprotocols    []string
+	// MaxMessageSize caps a single frame and the reassembled fragmented
+	// message total on the read side. Zero means the default (65536 bytes).
+	MaxMessageSize int
+	CheckOrigin    func(r *http.Request) bool
+	Subprotocols   []string
 }
 
 type WSConn struct {
-	conn    net.Conn
-	br      *bufio.Reader
-	writeMu sync.Mutex
-	readMu  sync.Mutex
-	closed  chan struct{}
-	once    sync.Once
+	conn           net.Conn
+	br             *bufio.Reader
+	writeMu        sync.Mutex
+	readMu         sync.Mutex
+	closed         chan struct{}
+	once           sync.Once
+	maxMessageSize int
 
 	onMessage func(messageType int, data []byte)
 	onClose   func(code int, text string)
 	onError   func(err error)
 	onPing    func(data []byte)
 	onPong    func(data []byte)
+}
+
+func (ws *WSConn) messageLimit() int {
+	if ws.maxMessageSize > 0 {
+		return ws.maxMessageSize
+	}
+	return maxFrameSize
 }
 
 func (ctx *Context) Upgrade(opts *UpgradeOptions) (*WSConn, error) {
@@ -159,6 +170,9 @@ func (ctx *Context) Upgrade(opts *UpgradeOptions) (*WSConn, error) {
 		conn:   conn,
 		br:     br,
 		closed: make(chan struct{}),
+	}
+	if opts != nil && opts.MaxMessageSize > 0 {
+		ws.maxMessageSize = opts.MaxMessageSize
 	}
 	return ws, nil
 }
@@ -407,7 +421,7 @@ func (ws *WSConn) readFrame() (opcode int, fin bool, payload []byte, err error) 
 		length = binary.BigEndian.Uint64(ext)
 	}
 
-	if length > maxFrameSize {
+	if length > uint64(ws.messageLimit()) {
 		return 0, false, nil, ErrWSInvalidFrame
 	}
 
@@ -450,7 +464,7 @@ func (ws *WSConn) readMessage() (opcode int, payload []byte, err error) {
 				// continuation without a preceding data frame
 				return 0, nil, ErrWSInvalidFrame
 			}
-			if len(buf)+len(data) > maxFrameSize {
+			if len(buf)+len(data) > ws.messageLimit() {
 				return 0, nil, ErrWSInvalidFrame
 			}
 			buf = append(buf, data...)

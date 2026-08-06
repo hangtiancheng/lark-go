@@ -168,7 +168,8 @@ func (s *Server) handleIndex(ctx *swifty_http.Context, next func()) {
 
 func (s *Server) handleWS(ctx *swifty_http.Context, next func()) {
 	ws, err := ctx.Upgrade(&swifty_http.UpgradeOptions{
-		CheckOrigin: func(r *http.Request) bool { return true },
+		CheckOrigin:    func(r *http.Request) bool { return true },
+		MaxMessageSize: 4 << 20, // 4MB
 	})
 	if err != nil {
 		log.Printf("WebSocket upgrade failed: %v", err)

@@ -21,6 +21,36 @@ Run the test suite:
 go test ./...
 ```
 
+## Remote mode
+
+Remote mode starts a web UI server (instead of the terminal TUI) that bridges
+the agent to browser clients over WebSocket. The default listen address is
+`:18888`; an optional address argument overrides it.
+
+Start from source (dev):
+
+```sh
+# default address :18888
+go run ./cmd/swiftx --remote
+
+# custom address
+go run ./cmd/swiftx --remote :9000
+```
+
+Start from a packaged binary:
+
+```sh
+go build -o build/swiftx ./cmd/swiftx
+
+# default address :18888
+./build/swiftx --remote
+
+# custom address
+./build/swiftx --remote :9000
+```
+
+Then open the printed URL (e.g. `http://localhost:18888`) in a browser.
+
 ## Building
 
 ### Build for the current platform

@@ -373,6 +373,8 @@ var (
 type UpgradeOptions struct {
     ReadBufferSize  int                        // bufio.Reader size; default 4096
     WriteBufferSize int                        // declared but currently unused
+    MaxMessageSize  int                        // read-side cap for a single frame and the
+                                               // reassembled fragmented total; 0 = 65536
     CheckOrigin     func(r *http.Request) bool // reject with 403 when it returns false
     Subprotocols    []string                   // server-preferred subprotocol list
 }
@@ -460,11 +462,12 @@ Frame handling and protocol conformance (reading path):
 - Fragmented messages are reassembled: a non-FIN text/binary frame starts a buffer,
   continuation frames (opcode 0) append, and the FIN continuation returns the whole
   message. A continuation without a preceding data frame, a new data frame while a
-  fragmented message is in progress, or a reassembled message exceeding
-  `maxFrameSize` all return `ErrWSInvalidFrame`.
-- `maxFrameSize` is 65536 bytes and bounds both a single frame and the reassembled
-  message total. The limit applies to reads only; `writeFrame` will emit frames of
-  any size.
+  fragmented message is in progress, or a reassembled message exceeding the
+  message size limit all return `ErrWSInvalidFrame`.
+- The message size limit bounds both a single frame and the reassembled message
+  total. It defaults to 65536 bytes (`maxFrameSize`) and is raised per connection
+  via `UpgradeOptions.MaxMessageSize`. The limit applies to reads only;
+  `writeFrame` will emit frames of any size.
 - Client frames must be masked (RFC 6455 5.1); unmasked frames are rejected with
   `ErrWSInvalidFrame`.
 - RSV1-3 bits must be zero (no extensions are negotiated); control frames
@@ -811,10 +814,11 @@ app.Get("/ws", func(ctx *swifty.Context, next func()) {
     client disconnect but never drains the channel; tie your producer to
     `ctx.Request.Context()` to avoid goroutine leaks.
 
-11. WebSocket messages are capped at 65536 bytes on the read side. Single frames
-    and reassembled fragmented messages beyond `maxFrameSize` return
-    `ErrWSInvalidFrame`. The write side is not capped, so a peer running the same
-    implementation will reject oversized frames you send.
+11. WebSocket messages are capped on the read side, 65536 bytes by default. Single
+    frames and reassembled fragmented messages beyond the limit return
+    `ErrWSInvalidFrame`; raise it with `UpgradeOptions.MaxMessageSize`. The write
+    side is not capped, so a peer running the same implementation with a smaller
+    limit will reject oversized frames you send.
 
 12. `WSConn.Listen` and `ReadMessage` must not run concurrently. `Listen` does not
     take `readMu`; pick one read pattern per connection.
@@ -886,31 +890,31 @@ Standard library packages used: `bufio`, `context`, `crypto/sha1`,
 Non-obvious contracts enforced by the source. Use this table when generating or
 reviewing `swifty_http` code.
 
-| Area                     | Contract                                                                                                                                                                         |
-| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Status promotion         | Body setters promote 404 to 200 immediately (`promoteStatus`); middleware after `next()` sees the final status. `respond()` repeats the check for direct `ctx.Body` assignments. |
-| Explicit status          | `SetStatus`, `Throw`, and `Redirect` mark the status explicit; direct `ctx.Status` field assignment does not, so explicit 404+body requires `SetStatus`/`Throw`.                 |
-| Throw shape              | `Throw` sets `Body = H{"message": msg, "data": nil}` -- the unified `{message, data}` envelope.                                                                                  |
-| Redirect status          | `Redirect` keeps a previously chosen 3xx (300/301/302/303/305/307/308), otherwise defaults to 302, and adds a `"Redirecting to <url>"` text body when `Body` is nil.             |
-| Empty statuses           | 204/205/304 strip the body and Content-Type/Length/Transfer-Encoding headers in `respond()`.                                                                                     |
-| Content-Type             | A Content-Type buffered via `ctx.Set` always beats the inferred `ctx.Type`.                                                                                                      |
-| Header keys              | `ctx.Set` canonicalizes keys; single value per header, no removal API, no multi-value (`Set-Cookie`) support.                                                                    |
-| respond skip             | `respond()` returns early when `ctx.flushed`; `SSE()`, `Upgrade()`, and Static rely on this.                                                                                     |
-| JSON failure             | `respondJSON` marshals before committing the status line; marshal failure downgrades cleanly to 500 JSON.                                                                        |
-| next() guard             | `compose` panics on a repeated `next()`; Recovery turns it into a 500.                                                                                                           |
-| Recovery                 | Re-raises `http.ErrAbortHandler`; otherwise logs `%v` + traceback and resets Status/Type/headers/Body to a fixed 500 JSON.                                                       |
-| Logger accuracy          | Logger reads `ctx.Status` after the chain; SSE records 200, Upgrade records 101, Static mirrors the real status via `statusRecorder`.                                            |
-| Router prefix            | `normalizePrefix` forces a leading `/` and strips trailing `/`; `/v1` matches `/v1` and `/v1/...`, never `/v10`.                                                                 |
-| Middleware collection    | Collected at request time from all matching routers in creation order; `Use` after child creation still applies.                                                                 |
-| Pattern canonicalization | `addRoute` rebuilds the pattern from parsed parts; `/users`, `/users/`, `//users` share one handler slot (last wins).                                                            |
-| Wildcard                 | `*name` must be last; later segments are silently dropped. Literal children beat wildcards.                                                                                      |
-| Static                   | Probes existence (handle closed immediately), 404 on miss, no directory listings without `index.html`, flushes `ctx.Set` headers before delegating.                              |
-| Server lifecycle         | `http.Server` is built in `New()`; `go app.Listen` + `Shutdown` is race-free; `Listen` returns `http.ErrServerClosed` after shutdown.                                            |
-| Templates                | `SetFuncMap` before `LoadHTMLGlob`; `LoadHTMLGlob` panics on parse errors.                                                                                                       |
-| SSE heartbeat            | Stop functions (SSE and WS) are idempotent and block until the goroutine exits.                                                                                                  |
-| SSE fields               | `ID` is a bare field line (pair it with `Data`/`Event`/`JSON`); `Retry` terminates the current event block.                                                                      |
-| WS handshake             | GET only (405), Connection/Upgrade tokens (400), `Sec-WebSocket-Version: 13` (400 + advisory header), key required (400), origin check (403), hijack required (500).             |
-| WS frames                | Fragmentation reassembled up to 65536 bytes total; unmasked client frames, RSV bits, oversized/fragmented control frames, unknown opcodes all rejected with `ErrWSInvalidFrame`. |
-| WS reads                 | `ReadMessage` auto-handles ping/pong and returns `ErrWSClosed` on close; `Listen` does not take `readMu` -- never mix the two.                                                   |
-| WS close                 | `Closed()` channel closes exactly once; read errors after a local `Close` do not trigger `OnError`.                                                                              |
-| WS writes                | Serialized by `writeMu`; `WriteBufferSize` is unused; no write-side size cap.                                                                                                    |
+| Area                     | Contract                                                                                                                                                                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Status promotion         | Body setters promote 404 to 200 immediately (`promoteStatus`); middleware after `next()` sees the final status. `respond()` repeats the check for direct `ctx.Body` assignments.                                                      |
+| Explicit status          | `SetStatus`, `Throw`, and `Redirect` mark the status explicit; direct `ctx.Status` field assignment does not, so explicit 404+body requires `SetStatus`/`Throw`.                                                                      |
+| Throw shape              | `Throw` sets `Body = H{"message": msg, "data": nil}` -- the unified `{message, data}` envelope.                                                                                                                                       |
+| Redirect status          | `Redirect` keeps a previously chosen 3xx (300/301/302/303/305/307/308), otherwise defaults to 302, and adds a `"Redirecting to <url>"` text body when `Body` is nil.                                                                  |
+| Empty statuses           | 204/205/304 strip the body and Content-Type/Length/Transfer-Encoding headers in `respond()`.                                                                                                                                          |
+| Content-Type             | A Content-Type buffered via `ctx.Set` always beats the inferred `ctx.Type`.                                                                                                                                                           |
+| Header keys              | `ctx.Set` canonicalizes keys; single value per header, no removal API, no multi-value (`Set-Cookie`) support.                                                                                                                         |
+| respond skip             | `respond()` returns early when `ctx.flushed`; `SSE()`, `Upgrade()`, and Static rely on this.                                                                                                                                          |
+| JSON failure             | `respondJSON` marshals before committing the status line; marshal failure downgrades cleanly to 500 JSON.                                                                                                                             |
+| next() guard             | `compose` panics on a repeated `next()`; Recovery turns it into a 500.                                                                                                                                                                |
+| Recovery                 | Re-raises `http.ErrAbortHandler`; otherwise logs `%v` + traceback and resets Status/Type/headers/Body to a fixed 500 JSON.                                                                                                            |
+| Logger accuracy          | Logger reads `ctx.Status` after the chain; SSE records 200, Upgrade records 101, Static mirrors the real status via `statusRecorder`.                                                                                                 |
+| Router prefix            | `normalizePrefix` forces a leading `/` and strips trailing `/`; `/v1` matches `/v1` and `/v1/...`, never `/v10`.                                                                                                                      |
+| Middleware collection    | Collected at request time from all matching routers in creation order; `Use` after child creation still applies.                                                                                                                      |
+| Pattern canonicalization | `addRoute` rebuilds the pattern from parsed parts; `/users`, `/users/`, `//users` share one handler slot (last wins).                                                                                                                 |
+| Wildcard                 | `*name` must be last; later segments are silently dropped. Literal children beat wildcards.                                                                                                                                           |
+| Static                   | Probes existence (handle closed immediately), 404 on miss, no directory listings without `index.html`, flushes `ctx.Set` headers before delegating.                                                                                   |
+| Server lifecycle         | `http.Server` is built in `New()`; `go app.Listen` + `Shutdown` is race-free; `Listen` returns `http.ErrServerClosed` after shutdown.                                                                                                 |
+| Templates                | `SetFuncMap` before `LoadHTMLGlob`; `LoadHTMLGlob` panics on parse errors.                                                                                                                                                            |
+| SSE heartbeat            | Stop functions (SSE and WS) are idempotent and block until the goroutine exits.                                                                                                                                                       |
+| SSE fields               | `ID` is a bare field line (pair it with `Data`/`Event`/`JSON`); `Retry` terminates the current event block.                                                                                                                           |
+| WS handshake             | GET only (405), Connection/Upgrade tokens (400), `Sec-WebSocket-Version: 13` (400 + advisory header), key required (400), origin check (403), hijack required (500).                                                                  |
+| WS frames                | Fragmentation reassembled up to `MaxMessageSize` bytes total (default 65536, set via `UpgradeOptions`); unmasked client frames, RSV bits, oversized/fragmented control frames, unknown opcodes all rejected with `ErrWSInvalidFrame`. |
+| WS reads                 | `ReadMessage` auto-handles ping/pong and returns `ErrWSClosed` on close; `Listen` does not take `readMu` -- never mix the two.                                                                                                        |
+| WS close                 | `Closed()` channel closes exactly once; read errors after a local `Close` do not trigger `OnError`.                                                                                                                                   |
+| WS writes                | Serialized by `writeMu`; `WriteBufferSize` is unused; no write-side size cap.                                                                                                                                                         |
