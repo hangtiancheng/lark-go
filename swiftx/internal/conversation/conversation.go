@@ -35,10 +35,11 @@ type ToolResultBlock struct {
 	ToolUseID string
 	Content   string
 	IsError   bool
-	// ContentBlocks 用于把工具结果发成结构化 content block 而不是纯文本。
-	// 目前只有官方端点下的 ToolSearch 会用：它回 tool_reference 块，由服务端
-	// 把 schema 展开进上下文。填了它时 Content 仍保留等价文本，token 估算和
-	// TUI 展示都走 Content。
+	// ContentBlocks carries structured content blocks instead of plain text
+	// for tool results. Currently only ToolSearch on the official endpoint
+	// uses this: it returns tool_reference blocks that the server expands
+	// into context. When populated, Content still holds the equivalent text;
+	// token estimation and TUI display both use Content.
 	ContentBlocks []map[string]any
 }
 

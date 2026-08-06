@@ -403,7 +403,7 @@ func (s *Server) initMCPServers() {
 	for _, errMsg := range result.Errors {
 		log.Printf("MCP error: %s", errMsg)
 	}
-	// 工具都在位了才算得准 schema 总量跟上下文窗口的比例
+	// All tools must be in place before measuring the schema-to-context ratio
 	if len(s.providers) > 0 {
 		p := &s.providers[0]
 		mcp.DecideAndApply(s.registry, p.BaseURL, p.GetContextWindow())

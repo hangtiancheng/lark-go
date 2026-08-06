@@ -169,8 +169,9 @@ func TestDiscoveredToolsIncludedInSchemas(t *testing.T) {
 	}
 }
 
-// MCP 工具不再被标记为已发现：它们永远不进 tools[]，调用走 McpCall。
-// 这样 tools 数组在整场会话里字节不变，prompt cache 的前缀不会被打断。
+// MCP tools are never marked as discovered: they never enter tools[]; calls
+// go through McpCall. This keeps the tools array byte-identical for the entire
+// session, so the prompt cache prefix is never invalidated.
 func TestToolSearchDoesNotMarkMCPToolsDiscovered(t *testing.T) {
 	reg := NewRegistry()
 	reg.McpLoadingMode = McpLoadingDispatch
@@ -180,22 +181,23 @@ func TestToolSearchDoesNotMarkMCPToolsDiscovered(t *testing.T) {
 	res := ts.Execute(context.Background(), map[string]any{"query": "select:mcp__grafana__query"})
 
 	if reg.IsDiscovered("mcp__grafana__query") {
-		t.Error("MCP 工具不该被标记为已发现")
+		t.Error("MCP tools should not be marked as discovered")
 	}
 	if len(reg.GetAllSchemas("anthropic")) != 0 {
-		t.Error("MCP 工具不该出现在 tools[] 里")
+		t.Error("MCP tools should not appear in tools[]")
 	}
-	// schema 原文要给模型看到，否则它不知道参数怎么填
+	// The raw schema must be visible to the model so it knows how to fill arguments
 	if !strings.Contains(res.Output, "mcp__grafana__query") {
-		t.Error("输出里应该含工具的 schema")
+		t.Error("output should contain the tool schema")
 	}
-	// 还要告诉它走哪个入口
+	// It must also indicate which entry point to use
 	if !strings.Contains(res.Output, "McpCall") {
-		t.Error("输出里应该提示用 McpCall 调用")
+		t.Error("output should mention McpCall as the invocation path")
 	}
 }
 
-// 非 MCP 的延迟工具没有 McpCall 这条入口，仍走老办法进 tools[]。
+// Non-MCP deferred tools have no McpCall entry point; they still use the
+// legacy path of entering tools[].
 func TestToolSearchStillMarksNonMCPDeferredTools(t *testing.T) {
 	reg := NewRegistry()
 	reg.McpLoadingMode = McpLoadingDispatch
@@ -205,14 +207,15 @@ func TestToolSearchStillMarksNonMCPDeferredTools(t *testing.T) {
 	ts.Execute(context.Background(), map[string]any{"query": "select:SomeDeferredTool"})
 
 	if !reg.IsDiscovered("SomeDeferredTool") {
-		t.Error("非 MCP 的延迟工具仍该被标记为已发现")
+		t.Error("non-MCP deferred tools should still be marked as discovered")
 	}
 	if len(reg.GetAllSchemas("anthropic")) != 1 {
-		t.Error("标记之后该出现在 tools[] 里")
+		t.Error("marked tools should appear in tools[]")
 	}
 }
 
-// 官方端点下回 tool_reference，由服务端展开 schema，tools 数组不动。
+// On the official endpoint, return tool_reference; the server expands the
+// schema and the tools array stays unchanged.
 func TestToolSearchReturnsToolReferenceInNativeMode(t *testing.T) {
 	reg := NewRegistry()
 	reg.McpLoadingMode = McpLoadingNative
@@ -222,18 +225,18 @@ func TestToolSearchReturnsToolReferenceInNativeMode(t *testing.T) {
 	res := ts.Execute(context.Background(), map[string]any{"query": "select:mcp__grafana__query"})
 
 	if len(res.ContentBlocks) != 1 {
-		t.Fatalf("期望 1 个 content block，实际 %d", len(res.ContentBlocks))
+		t.Fatalf("expected 1 content block, got %d", len(res.ContentBlocks))
 	}
 	if res.ContentBlocks[0]["type"] != "tool_reference" {
-		t.Errorf("block 类型应为 tool_reference，实际 %v", res.ContentBlocks[0]["type"])
+		t.Errorf("block type should be tool_reference, got %v", res.ContentBlocks[0]["type"])
 	}
 	if res.ContentBlocks[0]["tool_name"] != "mcp__grafana__query" {
-		t.Errorf("tool_name 不对：%v", res.ContentBlocks[0]["tool_name"])
+		t.Errorf("unexpected tool_name: %v", res.ContentBlocks[0]["tool_name"])
 	}
-	// native 下工具带 defer_loading 留在数组里，交给服务端决定可见性
+	// In native mode tools stay in the array with defer_loading; the server decides visibility
 	schemas := reg.GetAllSchemas("anthropic")
 	if len(schemas) != 1 || schemas[0]["defer_loading"] != true {
-		t.Errorf("native 模式下应带 defer_loading 保留在 tools[] 里，实际 %v", schemas)
+		t.Errorf("native mode should keep tools in tools[] with defer_loading, got %v", schemas)
 	}
 }
 func TestToolSearchSelect(t *testing.T) {

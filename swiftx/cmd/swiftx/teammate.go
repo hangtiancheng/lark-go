@@ -185,8 +185,9 @@ type teammateToolOptions struct {
 	TeamName   string
 	MemberName string
 	MCPServers []config.MCPServerConfig
-	// BaseURL 和 ContextWindow 供 MCP 加载模式分流用：判官方端点看前者，
-	// 判 schema 体量占比看后者。
+	// BaseURL and ContextWindow feed the MCP loading-mode decision:
+	// the former determines whether the endpoint is official, the latter
+	// determines the schema-to-context ratio.
 	BaseURL       string
 	ContextWindow int
 }
@@ -236,7 +237,7 @@ func buildTeammateRegistry(ctx context.Context, opts teammateToolOptions) *tools
 		}
 		mgr.LoadConfigs(serverConfigs)
 		mgr.RegisterAllTools(ctx, registry)
-		// 工具都在位了才算得准 schema 总量跟上下文窗口的比例
+		// All tools must be in place before measuring the schema-to-context ratio
 		mcp.DecideAndApply(registry, opts.BaseURL, opts.ContextWindow)
 	}
 

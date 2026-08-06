@@ -460,9 +460,10 @@ var contentFields = map[string]string{
 }
 
 func ExtractContent(toolName string, args map[string]any) string {
-	// McpCall 的匹配对象不是某一个参数，而是「要调用哪个 MCP 工具」，由
-	// server + tool 两个参数合成 server__tool。这样规则写成 McpCall(linear__*)
-	// 就能按服务器或按工具做 allow/deny。
+	// McpCall's match target is not a single argument but "which MCP tool to
+	// invoke", composed from the server + tool arguments as server__tool.
+	// This allows rules like McpCall(linear__*) to allow/deny by server or
+	// by tool.
 	if toolName == tools.McpCallToolName {
 		server, _ := args["server"].(string)
 		tool, _ := args["tool"].(string)

@@ -262,8 +262,8 @@ type MCPToolWrapper struct {
 	serverName string
 	toolDef    *mcp.Tool
 	client     *Client
-	// noDefer 由 eager 模式置位：schema 总量不大时 MCP 工具直接进 tools[]，
-	// 不必绕 ToolSearch
+	// noDefer is set by eager mode: when total schema size is small, MCP tools
+	// go directly into tools[] without going through ToolSearch
 	noDefer bool
 }
 
@@ -275,8 +275,10 @@ func SanitizeName(name string) string {
 	return nonAlphanumeric.ReplaceAllString(name, "_")
 }
 
-// MCPToolNamePrefix 是某个服务器下所有工具名的公共前缀。按服务器筛工具的地方
-// 都该用它，自己拼字符串会漏掉 sanitize——服务器名里的横杠会被换成下划线。
+// MCPToolNamePrefix returns the common prefix for all tool names under a given
+// server. All code that filters tools by server should use this; hand-building
+// the string would miss sanitization — hyphens in server names are replaced
+// with underscores.
 func MCPToolNamePrefix(serverName string) string {
 	return "mcp__" + SanitizeName(serverName) + "__"
 }
@@ -287,7 +289,8 @@ func (w *MCPToolWrapper) ShouldDefer() bool            { return !w.noDefer }
 func (w *MCPToolWrapper) SetDeferLoading(on bool)      { w.noDefer = !on }
 func (w *MCPToolWrapper) MCPServerName() string        { return w.serverName }
 
-// MCPInputSchema 返回原始 JSON schema。McpCall 的参数强转要按它逐层走。
+// MCPInputSchema returns the raw JSON schema. McpCall's argument coercion
+// walks it layer by layer.
 func (w *MCPToolWrapper) MCPInputSchema() map[string]any {
 	if w.toolDef.InputSchema == nil {
 		return map[string]any{}

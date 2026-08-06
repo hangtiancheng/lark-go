@@ -107,8 +107,8 @@ func (t *ToolSearchTool) Execute(ctx context.Context, args map[string]any) ToolR
 		}
 	}
 
-	// 非 MCP 的延迟工具没有 McpCall 这条入口，只能照旧标记成已发现、让它进
-	// 下一轮的 tools[]
+	// Non-MCP deferred tools have no McpCall entry point; mark them as
+	// discovered so they appear in the next round's tools[]
 	var mcpNames []string
 	for _, s := range schemas {
 		name, ok := s["name"].(string)
@@ -122,8 +122,9 @@ func (t *ToolSearchTool) Execute(ctx context.Context, args map[string]any) ToolR
 		}
 	}
 
-	// 官方端点：回 tool_reference，让服务端把 schema 展开进上下文。tools 数组
-	// 不动，缓存前缀因此不断。
+	// Official endpoint: return tool_reference blocks so the server expands
+	// the schema into context. The tools array stays unchanged, preserving
+	// the cache prefix.
 	if len(mcpNames) > 0 && t.Registry.McpLoadingMode == McpLoadingNative && !isOpenAIProtocol(t.Protocol) {
 		blocks := make([]map[string]any, 0, len(mcpNames))
 		for _, name := range mcpNames {
@@ -139,8 +140,9 @@ func (t *ToolSearchTool) Execute(ctx context.Context, args map[string]any) ToolR
 		}
 	}
 
-	// 其他端点：schema 原文给模型看，调用走 McpCall。这段文本落在 messages
-	// 末尾，属于追加，不影响缓存前缀。
+	// Other endpoints: show the raw schema to the model and route calls
+	// through McpCall. This text is appended to messages and does not
+	// affect the cache prefix.
 	suffix := ""
 	if len(mcpNames) > 0 {
 		suffix = "\n\nTo invoke any of the tools above, call McpCall with that tool's " +

@@ -9,28 +9,33 @@ import (
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/tools"
 )
 
-// 决定 MCP 工具怎么进上下文。三条路，会话启动连上 MCP 之后定一次：
+// Determines how MCP tools enter the context. Three paths, decided once at
+// session start after connecting to MCP:
 //
-//	eager    —— MCP schema 总量小于上下文的一成，全量放进 tools[]，不延迟。
-//	            省下来的那点上下文不值得为它承担任何额外风险。
-//	native   —— 官方 Anthropic 端点。工具带 defer_loading 留在 tools[] 里但服务端
-//	            不给模型看，ToolSearch 回 tool_reference 让服务端展开 schema。
-//	native 之外的端点不支持这两样，只能自己模拟：MCP 工具完全不进 tools[]，
-//	走 McpCall 统一入口。
+//	eager    — total MCP schema size is under 10% of context; load everything
+//	           into tools[] with no deferral. The small context savings are not
+//	           worth any additional risk.
+//	native   — official Anthropic endpoint. Tools stay in tools[] with
+//	           defer_loading but the server hides them from the model;
+//	           ToolSearch returns tool_reference so the server expands the schema.
+//	Endpoints other than native do not support either mechanism and must
+//	simulate it: MCP tools never enter tools[] and calls go through McpCall.
 //
-// 为什么要分这三条：tools 渲染在 system 之后、messages 之前，数组一变，它后面
-// 的整段对话历史缓存全部失效。实测 2 万 token 历史下，往 tools 末尾加一个工具
-// 的命中率从 99.4% 掉到 9.5%，等于把整段历史重算一遍。
+// Why three paths: tools are rendered after system and before messages; any
+// array change invalidates the entire trailing conversation history cache.
+// Measured with 20k-token history, appending one tool to tools drops the hit
+// rate from 99.4% to 9.5% — effectively recomputing the entire history.
 const (
-	// DefaultEagerThresholdPercent 低于上下文窗口这个比例就不延迟
+	// DefaultEagerThresholdPercent: below this fraction of the context window, skip deferral
 	DefaultEagerThresholdPercent = 10
 
-	// CharsPerToken 是拿不到真实 token 数时的估算比例。MCP 的 schema 是 JSON，
-	// 符号密度高，每 token 的字符数比自然语言低。
+	// CharsPerToken is the estimation ratio used when real token counts are
+	// unavailable. MCP schemas are JSON with high symbol density, so they
+	// have fewer characters per token than natural language.
 	CharsPerToken = 2.5
 
-	// NativeToolSearchBeta 是官方端点用的 beta header，defer_loading 和
-	// tool_reference 都靠它开。
+	// NativeToolSearchBeta is the beta header for the official endpoint;
+	// both defer_loading and tool_reference require it.
 	NativeToolSearchBeta = "advanced-tool-use-2025-11-20"
 
 	envLoadingOverride = "SWIFTX_MCP_LOADING"
@@ -38,8 +43,8 @@ const (
 
 var officialHosts = map[string]bool{"api.anthropic.com": true}
 
-// IsOfficialAnthropicEndpoint 判断是不是官方端点。baseURL 为空表示走 SDK 默认
-// 地址，也就是官方。
+// IsOfficialAnthropicEndpoint reports whether the endpoint is official.
+// An empty baseURL means the SDK default address, which is official.
 func IsOfficialAnthropicEndpoint(baseURL string) bool {
 	if baseURL == "" {
 		return true
@@ -51,12 +56,12 @@ func IsOfficialAnthropicEndpoint(baseURL string) bool {
 	return officialHosts[strings.ToLower(u.Hostname())]
 }
 
-// EstimateSchemaTokens 按字符数估算 token。
+// EstimateSchemaTokens estimates token count from character count.
 func EstimateSchemaTokens(schemaChars int) int {
 	return int(float64(schemaChars) / CharsPerToken)
 }
 
-// DecideMode 定加载模式。
+// DecideMode determines the loading mode.
 func DecideMode(baseURL string, contextWindow, mcpSchemaChars, thresholdPercent int) tools.McpLoadingMode {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(envLoadingOverride))) {
 	case "eager":
@@ -67,7 +72,7 @@ func DecideMode(baseURL string, contextWindow, mcpSchemaChars, thresholdPercent 
 		return tools.McpLoadingDispatch
 	}
 
-	// 没有 MCP 工具，走哪条都一样，eager 最省事
+	// No MCP tools; any path behaves the same, eager is simplest
 	if mcpSchemaChars <= 0 {
 		return tools.McpLoadingEager
 	}
@@ -82,7 +87,8 @@ func DecideMode(baseURL string, contextWindow, mcpSchemaChars, thresholdPercent 
 	return tools.McpLoadingDispatch
 }
 
-// MeasureSchemaChars 统计 MCP 工具 schema 序列化后的字符数，用来跟阈值比。
+// MeasureSchemaChars counts the serialized character length of MCP tool
+// schemas, used for threshold comparison.
 func MeasureSchemaChars(registry *tools.Registry) int {
 	total := 0
 	for _, t := range registry.ListTools() {
@@ -98,11 +104,13 @@ func MeasureSchemaChars(registry *tools.Registry) int {
 	return total
 }
 
-// ApplyMode 把决定落到 registry 上。
+// ApplyMode applies the decision to the registry.
 //
-// eager 下要把 MCP 工具的延迟标记摘掉，它们才会出现在 tools[] 里；另外两条路
-// 保持延迟。McpCall 不在这里注册——它必须在 MCP 连接之前就在 tools[] 里，
-// 否则连上之后再加就是一次中途改动 tools 数组，缓存照样断。
+// Under eager, the defer flag on MCP tools is cleared so they appear in
+// tools[]; the other two paths keep them deferred. McpCall is not registered
+// here — it must already be in tools[] before the MCP connection is
+// established; adding it after connection would be a mid-session tools array
+// change, breaking the cache just the same.
 func ApplyMode(registry *tools.Registry, mode tools.McpLoadingMode) {
 	registry.McpLoadingMode = mode
 	eager := mode == tools.McpLoadingEager
@@ -112,14 +120,15 @@ func ApplyMode(registry *tools.Registry, mode tools.McpLoadingMode) {
 		}
 	}
 
-	// 检索和分发按模式决定发不发。eager 下所有工具都在 tools[] 里，没有可搜的
-	// 对象、也不需要分发入口。这两个开关在这里算一次就固定下来，整场会话不变，
-	// 不会造成 tools[] 中途抖动。
+	// Search and dispatch exposure is decided by mode. Under eager all tools
+	// are in tools[]; there is nothing to search and no dispatch entry point
+	// needed. These two flags are computed once here and fixed for the entire
+	// session, causing no mid-session tools[] churn.
 	registry.ExposeToolSearch = !eager
 	registry.ExposeMcpCall = mode == tools.McpLoadingDispatch
 }
 
-// DecideAndApply 是连上 MCP 之后调一次的入口。
+// DecideAndApply is the single entry point called after connecting to MCP.
 func DecideAndApply(registry *tools.Registry, baseURL string, contextWindow int) tools.McpLoadingMode {
 	mode := DecideMode(baseURL, contextWindow, MeasureSchemaChars(registry), DefaultEagerThresholdPercent)
 	ApplyMode(registry, mode)

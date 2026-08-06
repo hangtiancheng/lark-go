@@ -39,14 +39,16 @@ import (
 
 const anthropicStreamIdleTimeout = 5 * time.Minute
 
-// nativeToolSearchBeta 开启 defer_loading 和 tool_reference。跟
-// mcp.NativeToolSearchBeta 是同一个值，这里单独定义以免 llm 反向依赖 mcp。
+// nativeToolSearchBeta enables defer_loading and tool_reference. It holds the
+// same value as mcp.NativeToolSearchBeta, defined here separately to avoid a
+// reverse dependency from llm to mcp.
 const nativeToolSearchBeta = "advanced-tool-use-2025-11-20"
 
-// needsToolSearchBeta 判断这批工具里有没有带 defer_loading 的。
+// needsToolSearchBeta checks whether any tool in this batch carries defer_loading.
 //
-// 只在真用到时才发这个 beta header：不认识它的端点收到会直接拒请求，而
-// dispatch / eager 两条路压根不需要它。
+// The beta header is only sent when actually needed: endpoints that do not
+// recognize it will reject the request outright, and the dispatch / eager
+// paths do not need it at all.
 func needsToolSearchBeta(toolSchemas []map[string]any) bool {
 	for _, s := range toolSchemas {
 		if deferLoading, _ := s["defer_loading"].(bool); deferLoading {
@@ -150,8 +152,9 @@ func (c *anthropicClient) Stream(ctx context.Context, conv *conversation.Manager
 	msgs := buildAnthropicMessages(conversation.EnsureToolPairing(conv.GetMessages()))
 
 	var sdkTools []anthropic.ToolUnionParam
-	// 带 defer_loading 的工具留在 tools[] 里但服务端不给模型看，模型要先用
-	// ToolSearch 拿 tool_reference 才能调。这个字段需要 beta header 才被接受。
+	// Tools with defer_loading stay in tools[] but the server hides them from
+	// the model; the model must first use ToolSearch to obtain a tool_reference
+	// before calling them. This field requires the beta header to be accepted.
 	sendToolSearchBeta := needsToolSearchBeta(toolSchemas)
 	for _, s := range toolSchemas {
 		inputSchema, _ := s["input_schema"].(map[string]any)
@@ -421,8 +424,9 @@ func buildAnthropicMessages(messages []conversation.Message) []anthropic.Message
 		} else if len(m.ToolResults) > 0 {
 			var blocks []anthropic.ContentBlockParamUnion
 			for _, tr := range m.ToolResults {
-				// 带结构化 block 的走 block 数组（tool_reference 这类要求服务端
-				// 解析的内容只能这么发），其余照旧发纯文本
+				// Structured blocks go through the block array (tool_reference and
+				// similar server-parsed content can only be sent this way);
+				// everything else is sent as plain text as before
 				content := []anthropic.ToolResultBlockParamContentUnion{{
 					OfText: &anthropic.TextBlockParam{Text: tr.Content},
 				}}
@@ -488,10 +492,12 @@ func classifyAnthropicError(err error) error {
 	return &NetworkError{Message: fmt.Sprintf("Network error: %s", err.Error())}
 }
 
-// toolResultContentBlocks 把工具产出的结构化 block 转成 SDK 的类型化联合。
-// 只认识 tool_reference——目前唯一需要服务端解析的块类型，官方端点下的
-// ToolSearch 用它让服务端把 MCP 工具的 schema 展开进上下文。认不出的块整个
-// 放弃转换，调用方会退回纯文本，宁可少发一个块也不发一个畸形请求。
+// toolResultContentBlocks converts structured blocks produced by tools into the
+// SDK's typed union. Only tool_reference is recognized — currently the only
+// block type requiring server-side parsing; ToolSearch on the official endpoint
+// uses it to have the server expand MCP tool schemas into context. Unrecognized
+// blocks cause the entire conversion to be abandoned and the caller falls back
+// to plain text — better to omit a block than to send a malformed request.
 func toolResultContentBlocks(raw []map[string]any) []anthropic.ToolResultBlockParamContentUnion {
 	if len(raw) == 0 {
 		return nil

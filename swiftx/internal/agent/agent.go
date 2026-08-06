@@ -246,8 +246,9 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 			}
 
 			// Inject deferred tool names into system-reminder so the model knows what's available via
-			// ToolSearch. dispatch 模式下这些工具永远不会进 tools[]，必须额外告诉
-			// 模型调用要走 McpCall，否则它读完 schema 也不知道从哪儿调。
+			// ToolSearch. In dispatch mode these tools never enter tools[], so the
+			// model must be explicitly told to invoke them via McpCall; otherwise
+			// it reads the schema but has no way to call the tool.
 			if deferredNames := a.Registry.GetDeferredToolNames(); len(deferredNames) > 0 {
 				reminder := "The following deferred tools are available via ToolSearch. Their schemas are NOT loaded - use ToolSearch with query \"select:<name>[,<name>...]\" to load tool schemas"
 				if a.Registry.McpLoadingMode == tools.McpLoadingDispatch {
@@ -564,8 +565,9 @@ type toolExecResult struct {
 	output   string
 	isError  bool
 	elapsed  time.Duration
-	// contentBlocks 让工具把结构化 content block 透到对话历史里。只有官方端点
-	// 下的 ToolSearch 会填（tool_reference），其余工具留空走纯文本。
+	// contentBlocks lets tools pass structured content blocks through to the
+	// conversation history. Only ToolSearch on the official endpoint populates
+	// this (tool_reference); all other tools leave it empty and use plain text.
 	contentBlocks []map[string]any
 }
 

@@ -556,7 +556,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 			mcpPrintLines = append(mcpPrintLines, errorStyle.Render("✗ "+errMsg))
 		}
-		// 工具都在位了才算得准 schema 总量跟上下文窗口的比例
+		// All tools must be in place before measuring the schema-to-context ratio
 		if p := m.selectedProvider; p != nil {
 			mcp.DecideAndApply(m.registry, p.BaseURL, p.GetContextWindow())
 		}
@@ -773,8 +773,10 @@ func (m *Model) registerAgentTools(client llm.Client, providerCfg *config.Provid
 	m.registry.Register(&todo.TaskListTool{List: m.todoList})
 	m.registry.Register(&todo.TaskUpdateTool{List: m.todoList})
 	m.registry.Register(&tools.ToolSearchTool{Registry: m.registry, Protocol: protocol})
-	// McpCall 必须在 MCP 连接之前就注册好。等连上再按加载模式决定注不注册，
-	// 本身就是一次中途改动 tools[]，缓存前缀照样断。
+	// McpCall must be registered before the MCP connection is established.
+	// Waiting until after connection to decide whether to register it based
+	// on loading mode would itself be a mid-session tools[] change, breaking
+	// the cache prefix.
 	m.registry.Register(&tools.McpCallTool{Registry: m.registry})
 	m.registry.Register(&teams.TeamCreateTool{TeamMgr: teamMgr})
 	m.registry.Register(&teams.TeamDeleteTool{TeamMgr: teamMgr})

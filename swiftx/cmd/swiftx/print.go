@@ -148,8 +148,9 @@ func runPrint(userPrompt string, cfg *config.AppConfig, hookConfigs []hooks.Hook
 	registry.Register(&teams.TaskStopTool{TeamMgr: teamMgr})
 	registry.Register(&tools.SyntheticOutputTool{})
 
-	// 连 MCP。放在内建工具都注册完之后：MCP 工具的加载模式要按 schema 总量跟
-	// 上下文窗口比，得等工具都在位才算得准。
+	// Connect MCP. Placed after all built-in tools are registered: the MCP
+	// loading mode depends on the ratio of total schema size to context
+	// window, which can only be measured accurately once all tools are in place.
 	if len(cfg.MCPServers) > 0 {
 		mcpMgr := mcp.NewManager()
 		serverConfigs := make([]mcp.ServerConfig, 0, len(cfg.MCPServers))

@@ -1,7 +1,3 @@
-// 来源：公众号@小林coding
-// 后端八股网站：xiaolincoding.com
-// Agent网站：xiaolinnote.com
-// 简历模版：jianli.xiaolinnote.com
 package mcp
 
 import (
@@ -37,54 +33,54 @@ func (s *stubMCPTool) Execute(ctx context.Context, args map[string]any) tools.To
 }
 
 func TestIsOfficialAnthropicEndpoint(t *testing.T) {
-	// 空 base_url 表示走 SDK 默认地址，也就是官方
+	// An empty base_url means the SDK default address, which is official
 	if !IsOfficialAnthropicEndpoint("") {
-		t.Error("空 base_url 应判为官方")
+		t.Error("empty base_url should be treated as official")
 	}
 	if !IsOfficialAnthropicEndpoint("https://api.anthropic.com") {
-		t.Error("官方域名应判为官方")
+		t.Error("official domain should be treated as official")
 	}
 	if IsOfficialAnthropicEndpoint("https://api.minimaxi.com/anthropic") {
-		t.Error("第三方端点不该判为官方")
+		t.Error("third-party endpoint should not be treated as official")
 	}
 }
 
 func TestDecideMode(t *testing.T) {
-	const window = 200000 // 一成是两万 token，约五万字符
+	const window = 200000 // 10% is 20k tokens, roughly 50k characters
 	cases := []struct {
 		desc    string
 		baseURL string
 		chars   int
 		want    tools.McpLoadingMode
 	}{
-		{"schema 很小就全量上", "https://proxy.example.com", 1000, tools.McpLoadingEager},
-		{"没有 MCP 工具也全量上", "https://proxy.example.com", 0, tools.McpLoadingEager},
-		{"官方端点走原生延迟", "", 500000, tools.McpLoadingNative},
-		{"第三方端点走 McpCall", "https://api.minimaxi.com/anthropic", 500000, tools.McpLoadingDispatch},
+		{"small schema loads eagerly", "https://proxy.example.com", 1000, tools.McpLoadingEager},
+		{"no MCP tools also loads eagerly", "https://proxy.example.com", 0, tools.McpLoadingEager},
+		{"official endpoint uses native deferral", "", 500000, tools.McpLoadingNative},
+		{"third-party endpoint uses McpCall", "https://api.minimaxi.com/anthropic", 500000, tools.McpLoadingDispatch},
 	}
 	for _, c := range cases {
 		if got := DecideMode(c.baseURL, window, c.chars, DefaultEagerThresholdPercent); got != c.want {
-			t.Errorf("%s：得到 %s，期望 %s", c.desc, got, c.want)
+			t.Errorf("%s: got %s, want %s", c.desc, got, c.want)
 		}
 	}
 }
 
 func TestDecideModeEnvOverride(t *testing.T) {
 	t.Setenv(envLoadingOverride, "dispatch")
-	// 小配置本该 eager，被环境变量强制成 dispatch
+	// Small config should be eager but is forced to dispatch by env var
 	if got := DecideMode("", 200000, 10, DefaultEagerThresholdPercent); got != tools.McpLoadingDispatch {
-		t.Errorf("环境变量该覆盖判定，得到 %s", got)
+		t.Errorf("env var should override the decision, got %s", got)
 	}
 }
 
 func TestMeasureSchemaCharsCountsOnlyMCPTools(t *testing.T) {
 	reg := tools.CreateDefaultRegistry()
 	if got := MeasureSchemaChars(reg); got != 0 {
-		t.Errorf("只有内建工具时该是 0，得到 %d", got)
+		t.Errorf("built-in tools only should yield 0, got %d", got)
 	}
 	reg.Register(&stubMCPTool{name: "mcp__linear__create_issue"})
 	if got := MeasureSchemaChars(reg); got <= 0 {
-		t.Errorf("有 MCP 工具时该大于 0，得到 %d", got)
+		t.Errorf("with MCP tools should be > 0, got %d", got)
 	}
 }
 
@@ -102,46 +98,46 @@ func TestApplyMode(t *testing.T) {
 		return
 	}
 
-	// eager：进 tools[]，不带 defer_loading
+	// eager: enters tools[] without defer_loading
 	reg := tools.CreateDefaultRegistry()
 	reg.Register(&stubMCPTool{name: "mcp__linear__create_issue"})
 	ApplyMode(reg, tools.McpLoadingEager)
 	if total, deferred := mcpCount(reg); total != 1 || deferred != 0 {
-		t.Errorf("eager：期望进数组且不带标记，得到 total=%d deferred=%d", total, deferred)
+		t.Errorf("eager: expected in array without flag, got total=%d deferred=%d", total, deferred)
 	}
 
-	// native：进 tools[] 且带 defer_loading，交给服务端决定可见性
+	// native: enters tools[] with defer_loading; the server decides visibility
 	reg = tools.CreateDefaultRegistry()
 	reg.Register(&stubMCPTool{name: "mcp__linear__create_issue"})
 	ApplyMode(reg, tools.McpLoadingNative)
 	if total, deferred := mcpCount(reg); total != 1 || deferred != 1 {
-		t.Errorf("native：期望进数组且带标记，得到 total=%d deferred=%d", total, deferred)
+		t.Errorf("native: expected in array with flag, got total=%d deferred=%d", total, deferred)
 	}
 
-	// dispatch：完全不进 tools[]，靠 McpCall 兜
+	// dispatch: never enters tools[]; relies on McpCall
 	reg = tools.CreateDefaultRegistry()
 	reg.Register(&stubMCPTool{name: "mcp__linear__create_issue"})
 	ApplyMode(reg, tools.McpLoadingDispatch)
 	if total, _ := mcpCount(reg); total != 0 {
-		t.Errorf("dispatch：MCP 工具不该出现在数组里，得到 %d 个", total)
+		t.Errorf("dispatch: MCP tools should not appear in array, got %d", total)
 	}
 }
 
 func TestNativeFlagNotSentOnOpenAIProtocol(t *testing.T) {
-	// defer_loading 是 Anthropic 的字段，openai 协议下不能带出去
+	// defer_loading is an Anthropic field; it must not leak under the openai protocol
 	reg := tools.CreateDefaultRegistry()
 	reg.Register(&stubMCPTool{name: "mcp__linear__create_issue"})
 	ApplyMode(reg, tools.McpLoadingNative)
 	for _, s := range reg.GetAllSchemas("openai") {
 		if name, _ := s["name"].(string); len(name) > 5 && name[:5] == "mcp__" {
-			t.Errorf("openai 协议下不该带出 MCP 工具：%s", name)
+			t.Errorf("MCP tools should not leak under openai protocol: %s", name)
 		}
 	}
 }
 
 func TestMCPToolNamePrefixSanitizes(t *testing.T) {
-	// 服务器名里的横杠要被换成下划线，否则按前缀筛工具会漏
+	// Hyphens in server names must be replaced with underscores, otherwise prefix-based filtering will miss tools
 	if got := MCPToolNamePrefix("chrome-devtools"); got != "mcp__chrome_devtools__" {
-		t.Errorf("得到 %q", got)
+		t.Errorf("got %q", got)
 	}
 }

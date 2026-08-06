@@ -40,31 +40,36 @@ const MaxOutputChars = 50000
 type ToolResult struct {
 	Output  string
 	IsError bool
-	// ContentBlocks 用于把工具结果发成结构化 content block 而不是纯文本。
-	// 目前只有官方 Anthropic 端点下的 ToolSearch 会用：它回 tool_reference 块，
-	// 由服务端把 schema 展开进上下文。填了这个字段时 Output 仍保留等价文本，
-	// 供 TUI 和日志展示。
+	// ContentBlocks carries structured content blocks instead of plain text
+	// for tool results. Currently only ToolSearch on the official Anthropic
+	// endpoint uses this: it returns tool_reference blocks that the server
+	// expands into context. When this field is populated, Output still holds
+	// the equivalent text for TUI and log display.
 	ContentBlocks []map[string]any
 }
 
-// McpLoadingMode 决定 MCP 工具怎么进上下文，由 internal/mcp 在连上服务器后写入
-// Registry。放在这里而不是 internal/mcp，是因为 Registry 要持有它，而
-// internal/mcp 依赖 internal/tools，反向引用会成环。
+// McpLoadingMode determines how MCP tools enter the context. It is written to
+// the Registry by internal/mcp after connecting to servers. It lives here
+// rather than in internal/mcp because Registry holds it, and internal/mcp
+// depends on internal/tools — a reverse reference would create a cycle.
 type McpLoadingMode string
 
 const (
-	// McpLoadingEager：schema 总量小于上下文的一成，全量放进 tools[]，不延迟。
+	// McpLoadingEager: total schema size is under 10% of context; load all
+	// tools into tools[] with no deferral.
 	McpLoadingEager McpLoadingMode = "eager"
-	// McpLoadingNative：官方端点。工具带 defer_loading 留在 tools[] 里但服务端
-	// 不给模型看，ToolSearch 回 tool_reference 让服务端展开 schema。
+	// McpLoadingNative: official endpoint. Tools stay in tools[] with
+	// defer_loading but the server hides them from the model; ToolSearch
+	// returns tool_reference so the server expands the schema.
 	McpLoadingNative McpLoadingMode = "native"
-	// McpLoadingDispatch：其他端点不支持 defer_loading，MCP 工具完全不进
-	// tools[]，走 McpCall 统一入口。
+	// McpLoadingDispatch: other endpoints do not support defer_loading;
+	// MCP tools never enter tools[] and calls go through McpCall.
 	McpLoadingDispatch McpLoadingMode = "dispatch"
 )
 
-// MCPTool 是 MCP 工具包装器额外暴露给分发和分流逻辑的能力。用结构化接口而不是
-// 直接引用 internal/mcp，同样是为了避开循环依赖。
+// MCPTool exposes additional capabilities of MCP tool wrappers to the dispatch
+// and routing logic. A structured interface is used instead of a direct
+// reference to internal/mcp, again to avoid a circular dependency.
 type MCPTool interface {
 	Tool
 	MCPServerName() string
@@ -72,7 +77,8 @@ type MCPTool interface {
 	SetDeferLoading(bool)
 }
 
-// ToolSearchToolName 是工具检索的名字，注册表按模式筛它时要用。
+// ToolSearchToolName is the tool-search tool's name, used when the registry
+// filters tools by mode.
 const ToolSearchToolName = "ToolSearch"
 
 type ToolCategory string
@@ -109,14 +115,15 @@ type DeferrableTool interface {
 type Registry struct {
 	tools           map[string]Tool
 	discoveredTools map[string]bool
-	// McpLoadingMode 由 mcp.DecideAndApply 在连上服务器后写入。没有 MCP 时保持
-	// eager，行为等同于不延迟。
+	// McpLoadingMode is written by mcp.DecideAndApply after connecting to
+	// servers. Without MCP it stays eager, which is equivalent to no deferral.
 	McpLoadingMode McpLoadingMode
 
-	// ExposeToolSearch / ExposeMcpCall 决定这两个工具发不发给模型，由
-	// mcp.ApplyMode 在会话启动时算一次。不每轮按「当前还有没有延迟工具」现算：
-	// 工具可能被运行时禁用，现算会让 tools[] 中途少一个，那就是一次数组变动，
-	// 缓存前缀照样断。
+	// ExposeToolSearch / ExposeMcpCall control whether these two tools are
+	// sent to the model, computed once by mcp.ApplyMode at session start.
+	// They are not recomputed each turn based on "are there still deferred
+	// tools": tools may be disabled at runtime, and recomputing would remove
+	// a tool mid-session — that is an array change that breaks the cache prefix.
 	ExposeToolSearch bool
 	ExposeMcpCall    bool
 }
@@ -165,14 +172,18 @@ func isOpenAIProtocol(protocol string) bool {
 }
 
 func (r *Registry) GetAllSchemas(protocol string) []map[string]any {
-	// 官方端点走原生延迟：工具留在 tools[] 里但打上 defer_loading，由服务端决定
-	// 给不给模型看。这样即使发现了新工具，tools 数组的字节也不变，prompt cache
-	// 的前缀不会被打断。其他端点只能把延迟工具整个藏起来，靠 McpCall 兜。
+	// Official endpoint uses native deferral: tools stay in tools[] with
+	// defer_loading and the server decides visibility. This way, even when
+	// new tools are discovered, the tools array bytes do not change and the
+	// prompt cache prefix is preserved. Other endpoints must hide deferred
+	// tools entirely and rely on McpCall.
 	native := r.McpLoadingMode == McpLoadingNative && !isOpenAIProtocol(protocol)
 	schemas := make([]map[string]any, 0, len(r.tools))
 	for _, t := range r.tools {
-		// 检索和分发只在用得上的模式里发。eager 下没有延迟工具可搜、也不需要
-		// 分发，两个都发过去只是白占 token，还可能引诱模型去绕一圈。
+		// Search and dispatch are only exposed in modes that need them. Under
+		// eager there are no deferred tools to search and no dispatch needed;
+		// sending both would only waste tokens and might tempt the model into
+		// a needless detour.
 		if name := t.Name(); name == ToolSearchToolName && !r.ExposeToolSearch {
 			continue
 		} else if name == McpCallToolName && !r.ExposeMcpCall {
