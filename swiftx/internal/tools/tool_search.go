@@ -32,7 +32,7 @@ type ToolSearchTool struct {
 	Protocol string
 }
 
-func (t *ToolSearchTool) Name() string { return "ToolSearch" }
+func (t *ToolSearchTool) Name() string { return ToolSearchToolName }
 
 func (t *ToolSearchTool) Description() string {
 	return `Search for and load additional tools that are not immediately available. Some tools are deferred (not loaded by default) to save context space. Use this tool to discover and load them.
@@ -107,15 +107,49 @@ func (t *ToolSearchTool) Execute(ctx context.Context, args map[string]any) ToolR
 		}
 	}
 
-	// Mark discovered tools so their schemas are included in subsequent API requests
+	// 非 MCP 的延迟工具没有 McpCall 这条入口，只能照旧标记成已发现、让它进
+	// 下一轮的 tools[]
+	var mcpNames []string
 	for _, s := range schemas {
-		if name, ok := s["name"].(string); ok {
+		name, ok := s["name"].(string)
+		if !ok {
+			continue
+		}
+		if strings.HasPrefix(name, MCPToolPrefix) {
+			mcpNames = append(mcpNames, name)
+		} else {
 			t.Registry.MarkDiscovered(name)
 		}
 	}
 
+	// 官方端点：回 tool_reference，让服务端把 schema 展开进上下文。tools 数组
+	// 不动，缓存前缀因此不断。
+	if len(mcpNames) > 0 && t.Registry.McpLoadingMode == McpLoadingNative && !isOpenAIProtocol(t.Protocol) {
+		blocks := make([]map[string]any, 0, len(mcpNames))
+		for _, name := range mcpNames {
+			blocks = append(blocks, map[string]any{
+				"type":      "tool_reference",
+				"tool_name": name,
+			})
+		}
+		return ToolResult{
+			Output: fmt.Sprintf("Loaded %d tool(s): %s. You can call them directly now.",
+				len(mcpNames), strings.Join(mcpNames, ", ")),
+			ContentBlocks: blocks,
+		}
+	}
+
+	// 其他端点：schema 原文给模型看，调用走 McpCall。这段文本落在 messages
+	// 末尾，属于追加，不影响缓存前缀。
+	suffix := ""
+	if len(mcpNames) > 0 {
+		suffix = "\n\nTo invoke any of the tools above, call McpCall with that tool's " +
+			"full name and an `arguments` object matching its input_schema exactly, " +
+			"using the same JSON types."
+	}
 	schemasJSON, _ := json.MarshalIndent(schemas, "", "  ")
 	return ToolResult{
-		Output: fmt.Sprintf("Found %d tool(s). Their full schemas are now loaded and will be available in subsequent requests:\n\n%s", len(schemas), string(schemasJSON)),
+		Output: fmt.Sprintf("Found %d tool(s). Their full schemas are below:\n\n%s%s",
+			len(schemas), string(schemasJSON), suffix),
 	}
 }

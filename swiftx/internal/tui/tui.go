@@ -556,6 +556,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			})
 			mcpPrintLines = append(mcpPrintLines, errorStyle.Render("✗ "+errMsg))
 		}
+		// 工具都在位了才算得准 schema 总量跟上下文窗口的比例
+		if p := m.selectedProvider; p != nil {
+			mcp.DecideAndApply(m.registry, p.BaseURL, p.GetContextWindow())
+		}
 		registered := len(msg.result.Tools)
 		if registered > 0 {
 			m.mcpServerInfo = fmt.Sprintf("Connected to %d MCP server(s), %d tools registered", len(m.mcpConfigs)-len(msg.result.Errors), registered)
@@ -568,7 +572,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			for _, t := range msg.result.Tools {
 				toolName := t.Name()
 				for _, srv := range msg.result.Servers {
-					if strings.HasPrefix(toolName, "mcp__"+mcp.SanitizeName(srv.Name)+"__") {
+					if strings.HasPrefix(toolName, mcp.MCPToolNamePrefix(srv.Name)) {
 						toolsByServer[srv.Name] = append(toolsByServer[srv.Name], toolName)
 						break
 					}
@@ -769,6 +773,9 @@ func (m *Model) registerAgentTools(client llm.Client, providerCfg *config.Provid
 	m.registry.Register(&todo.TaskListTool{List: m.todoList})
 	m.registry.Register(&todo.TaskUpdateTool{List: m.todoList})
 	m.registry.Register(&tools.ToolSearchTool{Registry: m.registry, Protocol: protocol})
+	// McpCall 必须在 MCP 连接之前就注册好。等连上再按加载模式决定注不注册，
+	// 本身就是一次中途改动 tools[]，缓存前缀照样断。
+	m.registry.Register(&tools.McpCallTool{Registry: m.registry})
 	m.registry.Register(&teams.TeamCreateTool{TeamMgr: teamMgr})
 	m.registry.Register(&teams.TeamDeleteTool{TeamMgr: teamMgr})
 	m.registry.Register(&teams.SendMessageTool{TeamMgr: teamMgr, SenderName: "lead"})

@@ -246,10 +246,16 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 			}
 
 			// Inject deferred tool names into system-reminder so the model knows what's available via
-			// ToolSearch.
+			// ToolSearch. dispatch 模式下这些工具永远不会进 tools[]，必须额外告诉
+			// 模型调用要走 McpCall，否则它读完 schema 也不知道从哪儿调。
 			if deferredNames := a.Registry.GetDeferredToolNames(); len(deferredNames) > 0 {
-				reminder := "The following deferred tools are available via ToolSearch. Their schemas are NOT loaded - use ToolSearch with query \"select:<name>[,<name>...]\" to load tool schemas before calling them:\n" + strings.Join(deferredNames, "\n")
-				conv.AddSystemReminder(reminder)
+				reminder := "The following deferred tools are available via ToolSearch. Their schemas are NOT loaded - use ToolSearch with query \"select:<name>[,<name>...]\" to load tool schemas"
+				if a.Registry.McpLoadingMode == tools.McpLoadingDispatch {
+					reminder += ", then invoke them with the McpCall tool"
+				} else {
+					reminder += " before calling them"
+				}
+				conv.AddSystemReminder(reminder + ":\n" + strings.Join(deferredNames, "\n"))
 			}
 
 			a.emitHook(hooks.EventPreSend, "", nil)
@@ -435,9 +441,10 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 					exempt[r.toolID] = true
 				}
 				toolResults = append(toolResults, conversation.ToolResultBlock{
-					ToolUseID: r.toolID,
-					Content:   content,
-					IsError:   r.isError,
+					ToolUseID:     r.toolID,
+					Content:       content,
+					IsError:       r.isError,
+					ContentBlocks: r.contentBlocks,
 				})
 			}
 
@@ -557,6 +564,9 @@ type toolExecResult struct {
 	output   string
 	isError  bool
 	elapsed  time.Duration
+	// contentBlocks 让工具把结构化 content block 透到对话历史里。只有官方端点
+	// 下的 ToolSearch 会填（tool_reference），其余工具留空走纯文本。
+	contentBlocks []map[string]any
 }
 
 // extractFilePath pulls a representative path from common tool argument keys so hooks can do path-
@@ -670,11 +680,12 @@ func (a *Agent) executeSingleTool(ctx context.Context, eventCh chan AgentEvent, 
 	}
 
 	return toolExecResult{
-		toolID:   tc.toolID,
-		toolName: tc.toolName,
-		output:   result.Output,
-		isError:  result.IsError,
-		elapsed:  time.Since(start),
+		toolID:        tc.toolID,
+		toolName:      tc.toolName,
+		output:        result.Output,
+		isError:       result.IsError,
+		elapsed:       time.Since(start),
+		contentBlocks: result.ContentBlocks,
 	}
 }
 

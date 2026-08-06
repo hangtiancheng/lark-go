@@ -356,6 +356,7 @@ func (s *Server) registerTools(client llm.Client, p *config.ProviderConfig, wd s
 	s.registry.Register(&todo.TaskListTool{List: s.todoList})
 	s.registry.Register(&todo.TaskUpdateTool{List: s.todoList})
 	s.registry.Register(&tools.ToolSearchTool{Registry: s.registry, Protocol: p.Protocol})
+	s.registry.Register(&tools.McpCallTool{Registry: s.registry})
 	s.registry.Register(&teams.TeamCreateTool{TeamMgr: s.teamMgr})
 	s.registry.Register(&teams.TeamDeleteTool{TeamMgr: s.teamMgr})
 	s.registry.Register(&teams.SendMessageTool{TeamMgr: s.teamMgr, SenderName: "lead"})
@@ -402,12 +403,17 @@ func (s *Server) initMCPServers() {
 	for _, errMsg := range result.Errors {
 		log.Printf("MCP error: %s", errMsg)
 	}
+	// 工具都在位了才算得准 schema 总量跟上下文窗口的比例
+	if len(s.providers) > 0 {
+		p := &s.providers[0]
+		mcp.DecideAndApply(s.registry, p.BaseURL, p.GetContextWindow())
+	}
 	if len(result.Servers) > 0 {
 		toolsByServer := make(map[string][]string)
 		for _, t := range result.Tools {
 			toolName := t.Name()
 			for _, srv := range result.Servers {
-				if strings.HasPrefix(toolName, "mcp__"+mcp.SanitizeName(srv.Name)+"__") {
+				if strings.HasPrefix(toolName, mcp.MCPToolNamePrefix(srv.Name)) {
 					toolsByServer[srv.Name] = append(toolsByServer[srv.Name], toolName)
 					break
 				}

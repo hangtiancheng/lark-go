@@ -35,6 +35,7 @@ import (
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/file_history"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/hooks"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/llm"
+	"github.com/hangtiancheng/swifty.go/swiftx/internal/mcp"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/memory"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/permissions"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/prompt"
@@ -137,6 +138,7 @@ func runPrint(userPrompt string, cfg *config.AppConfig, hookConfigs []hooks.Hook
 	registry.Register(&todo.TaskListTool{List: todoList})
 	registry.Register(&todo.TaskUpdateTool{List: todoList})
 	registry.Register(&tools.ToolSearchTool{Registry: registry, Protocol: p.Protocol})
+	registry.Register(&tools.McpCallTool{Registry: registry})
 
 	// Team tools are also available in -p mode; the lead can assemble a team and delegate work in a single non-interactive run
 	teamMgr := teams.NewTeamManager()
@@ -145,6 +147,30 @@ func runPrint(userPrompt string, cfg *config.AppConfig, hookConfigs []hooks.Hook
 	registry.Register(&teams.SendMessageTool{TeamMgr: teamMgr, SenderName: "lead"})
 	registry.Register(&teams.TaskStopTool{TeamMgr: teamMgr})
 	registry.Register(&tools.SyntheticOutputTool{})
+
+	// 连 MCP。放在内建工具都注册完之后：MCP 工具的加载模式要按 schema 总量跟
+	// 上下文窗口比，得等工具都在位才算得准。
+	if len(cfg.MCPServers) > 0 {
+		mcpMgr := mcp.NewManager()
+		serverConfigs := make([]mcp.ServerConfig, 0, len(cfg.MCPServers))
+		for _, c := range cfg.MCPServers {
+			serverConfigs = append(serverConfigs, mcp.ServerConfig{
+				Name:      c.Name,
+				Command:   c.Command,
+				Args:      c.Args,
+				URL:       c.URL,
+				Transport: c.Transport,
+				Headers:   c.Headers,
+				Env:       c.Env,
+			})
+		}
+		mcpMgr.LoadConfigs(serverConfigs)
+		for _, e := range mcpMgr.RegisterAllTools(context.Background(), registry) {
+			fmt.Fprintf(os.Stderr, "MCP warning: %s\n", e)
+		}
+		mcp.DecideAndApply(registry, p.BaseURL, p.GetContextWindow())
+		defer mcpMgr.Shutdown()
+	}
 
 	subProgressCh := make(chan subagent.SubAgentProgress, 32)
 	registry.Register(&subagent.AgentTool{

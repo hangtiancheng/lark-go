@@ -145,13 +145,15 @@ func runTeammate(args teammateArgs) error {
 	}
 
 	registry := buildTeammateRegistry(ctx, teammateToolOptions{
-		WorkDir:    wd,
-		Protocol:   provider.Protocol,
-		SessionID:  sessionID,
-		TeamMgr:    teamMgr,
-		TeamName:   args.teamName,
-		MemberName: args.memberName,
-		MCPServers: cfg.MCPServers,
+		WorkDir:       wd,
+		Protocol:      provider.Protocol,
+		SessionID:     sessionID,
+		TeamMgr:       teamMgr,
+		TeamName:      args.teamName,
+		MemberName:    args.memberName,
+		MCPServers:    cfg.MCPServers,
+		BaseURL:       provider.BaseURL,
+		ContextWindow: provider.GetContextWindow(),
 	})
 
 	member := team.AddMember(args.memberName, client, registry, provider.Protocol)
@@ -183,6 +185,10 @@ type teammateToolOptions struct {
 	TeamName   string
 	MemberName string
 	MCPServers []config.MCPServerConfig
+	// BaseURL 和 ContextWindow 供 MCP 加载模式分流用：判官方端点看前者，
+	// 判 schema 体量占比看后者。
+	BaseURL       string
+	ContextWindow int
 }
 
 // buildTeammateRegistry assembles the teammate tool set: file and command
@@ -201,6 +207,7 @@ func buildTeammateRegistry(ctx context.Context, opts teammateToolOptions) *tools
 	registry := tools.CreateDefaultToolsWithWorkDir(opts.WorkDir).Registry
 
 	registry.Register(&tools.ToolSearchTool{Registry: registry, Protocol: opts.Protocol})
+	registry.Register(&tools.McpCallTool{Registry: registry})
 	registry.Register(&tools.SyntheticOutputTool{})
 
 	gitRoot := worktree.FindCanonicalGitRoot(opts.WorkDir)
@@ -229,6 +236,8 @@ func buildTeammateRegistry(ctx context.Context, opts teammateToolOptions) *tools
 		}
 		mgr.LoadConfigs(serverConfigs)
 		mgr.RegisterAllTools(ctx, registry)
+		// 工具都在位了才算得准 schema 总量跟上下文窗口的比例
+		mcp.DecideAndApply(registry, opts.BaseURL, opts.ContextWindow)
 	}
 
 	return registry

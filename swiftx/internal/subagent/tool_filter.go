@@ -74,6 +74,9 @@ var AsyncAgentAllowedTools = map[string]bool{
 	"ToolSearch":      true,
 	"EnterWorktree":   true,
 	"ExitWorktree":    true,
+	// ToolSearch 只负责把 schema 读出来，真正调用要靠 McpCall，
+	// 两个得成对放行，否则子 Agent 看得见工具却调不动
+	"McpCall": true,
 }
 
 // InProcessTeammateAllowedTools When a sub-agent is spawned as an in-process teammate (ch15 Agent

@@ -39,6 +39,23 @@ import (
 
 const anthropicStreamIdleTimeout = 5 * time.Minute
 
+// nativeToolSearchBeta 开启 defer_loading 和 tool_reference。跟
+// mcp.NativeToolSearchBeta 是同一个值，这里单独定义以免 llm 反向依赖 mcp。
+const nativeToolSearchBeta = "advanced-tool-use-2025-11-20"
+
+// needsToolSearchBeta 判断这批工具里有没有带 defer_loading 的。
+//
+// 只在真用到时才发这个 beta header：不认识它的端点收到会直接拒请求，而
+// dispatch / eager 两条路压根不需要它。
+func needsToolSearchBeta(toolSchemas []map[string]any) bool {
+	for _, s := range toolSchemas {
+		if deferLoading, _ := s["defer_loading"].(bool); deferLoading {
+			return true
+		}
+	}
+	return false
+}
+
 func supportsAdaptiveThinking(model string) bool {
 	// claude-opus-4-6, claude-opus-4-7, claude-sonnet-4-6, etc.
 	// but NOT claude-sonnet-4-5 (4.5 uses enabled mode)
@@ -133,21 +150,26 @@ func (c *anthropicClient) Stream(ctx context.Context, conv *conversation.Manager
 	msgs := buildAnthropicMessages(conversation.EnsureToolPairing(conv.GetMessages()))
 
 	var sdkTools []anthropic.ToolUnionParam
+	// 带 defer_loading 的工具留在 tools[] 里但服务端不给模型看，模型要先用
+	// ToolSearch 拿 tool_reference 才能调。这个字段需要 beta header 才被接受。
+	sendToolSearchBeta := needsToolSearchBeta(toolSchemas)
 	for _, s := range toolSchemas {
 		inputSchema, _ := s["input_schema"].(map[string]any)
 		props := inputSchema["properties"]
 		required, _ := inputSchema["required"].([]string)
 		desc, _ := s["description"].(string)
-		sdkTools = append(sdkTools, anthropic.ToolUnionParam{
-			OfTool: &anthropic.ToolParam{
-				Name:        s["name"].(string),
-				Description: param.NewOpt(desc),
-				InputSchema: anthropic.ToolInputSchemaParam{
-					Properties: props,
-					Required:   required,
-				},
+		tool := &anthropic.ToolParam{
+			Name:        s["name"].(string),
+			Description: param.NewOpt(desc),
+			InputSchema: anthropic.ToolInputSchemaParam{
+				Properties: props,
+				Required:   required,
 			},
-		})
+		}
+		if deferLoading, _ := s["defer_loading"].(bool); deferLoading {
+			tool.DeferLoading = param.NewOpt(true)
+		}
+		sdkTools = append(sdkTools, anthropic.ToolUnionParam{OfTool: tool})
 	}
 
 	go func() {
@@ -194,7 +216,12 @@ func (c *anthropicClient) Stream(ctx context.Context, conv *conversation.Manager
 			params.Tools = sdkTools
 		}
 
-		stream := c.client.Messages.NewStreaming(ctx, params)
+		var reqOpts []option.RequestOption
+		if sendToolSearchBeta {
+			reqOpts = append(reqOpts, option.WithHeaderAdd("anthropic-beta", nativeToolSearchBeta))
+		}
+
+		stream := c.client.Messages.NewStreaming(ctx, params, reqOpts...)
 		defer stream.Close()
 
 		var currentToolName, currentToolID, jsonAccum string
@@ -394,13 +421,19 @@ func buildAnthropicMessages(messages []conversation.Message) []anthropic.Message
 		} else if len(m.ToolResults) > 0 {
 			var blocks []anthropic.ContentBlockParamUnion
 			for _, tr := range m.ToolResults {
+				// 带结构化 block 的走 block 数组（tool_reference 这类要求服务端
+				// 解析的内容只能这么发），其余照旧发纯文本
+				content := []anthropic.ToolResultBlockParamContentUnion{{
+					OfText: &anthropic.TextBlockParam{Text: tr.Content},
+				}}
+				if structured := toolResultContentBlocks(tr.ContentBlocks); len(structured) > 0 {
+					content = structured
+				}
 				blocks = append(blocks, anthropic.ContentBlockParamUnion{
 					OfToolResult: &anthropic.ToolResultBlockParam{
 						ToolUseID: tr.ToolUseID,
 						IsError:   param.NewOpt(tr.IsError),
-						Content: []anthropic.ToolResultBlockParamContentUnion{{
-							OfText: &anthropic.TextBlockParam{Text: tr.Content},
-						}},
+						Content:   content,
 					},
 				})
 			}
@@ -453,4 +486,29 @@ func classifyAnthropicError(err error) error {
 		}
 	}
 	return &NetworkError{Message: fmt.Sprintf("Network error: %s", err.Error())}
+}
+
+// toolResultContentBlocks 把工具产出的结构化 block 转成 SDK 的类型化联合。
+// 只认识 tool_reference——目前唯一需要服务端解析的块类型，官方端点下的
+// ToolSearch 用它让服务端把 MCP 工具的 schema 展开进上下文。认不出的块整个
+// 放弃转换，调用方会退回纯文本，宁可少发一个块也不发一个畸形请求。
+func toolResultContentBlocks(raw []map[string]any) []anthropic.ToolResultBlockParamContentUnion {
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]anthropic.ToolResultBlockParamContentUnion, 0, len(raw))
+	for _, b := range raw {
+		blockType, _ := b["type"].(string)
+		if blockType != "tool_reference" {
+			return nil
+		}
+		name, _ := b["tool_name"].(string)
+		if name == "" {
+			return nil
+		}
+		out = append(out, anthropic.ToolResultBlockParamContentUnion{
+			OfToolReference: &anthropic.ToolReferenceBlockParam{ToolName: name},
+		})
+	}
+	return out
 }

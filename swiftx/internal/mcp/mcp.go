@@ -262,18 +262,41 @@ type MCPToolWrapper struct {
 	serverName string
 	toolDef    *mcp.Tool
 	client     *Client
+	// noDefer 由 eager 模式置位：schema 总量不大时 MCP 工具直接进 tools[]，
+	// 不必绕 ToolSearch
+	noDefer bool
 }
 
 func (w *MCPToolWrapper) Name() string {
-	return "mcp__" + SanitizeName(w.serverName) + "__" + SanitizeName(w.toolDef.Name)
+	return MCPToolNamePrefix(w.serverName) + SanitizeName(w.toolDef.Name)
 }
 
 func SanitizeName(name string) string {
 	return nonAlphanumeric.ReplaceAllString(name, "_")
 }
+
+// MCPToolNamePrefix 是某个服务器下所有工具名的公共前缀。按服务器筛工具的地方
+// 都该用它，自己拼字符串会漏掉 sanitize——服务器名里的横杠会被换成下划线。
+func MCPToolNamePrefix(serverName string) string {
+	return "mcp__" + SanitizeName(serverName) + "__"
+}
+
 func (w *MCPToolWrapper) Description() string          { return w.toolDef.Description }
 func (w *MCPToolWrapper) Category() tools.ToolCategory { return tools.CategoryCommand }
-func (w *MCPToolWrapper) ShouldDefer() bool            { return true }
+func (w *MCPToolWrapper) ShouldDefer() bool            { return !w.noDefer }
+func (w *MCPToolWrapper) SetDeferLoading(on bool)      { w.noDefer = !on }
+func (w *MCPToolWrapper) MCPServerName() string        { return w.serverName }
+
+// MCPInputSchema 返回原始 JSON schema。McpCall 的参数强转要按它逐层走。
+func (w *MCPToolWrapper) MCPInputSchema() map[string]any {
+	if w.toolDef.InputSchema == nil {
+		return map[string]any{}
+	}
+	if m, ok := w.toolDef.InputSchema.(map[string]any); ok {
+		return m
+	}
+	return map[string]any{}
+}
 
 func (w *MCPToolWrapper) Schema() map[string]any {
 	inputSchema := w.toolDef.InputSchema
