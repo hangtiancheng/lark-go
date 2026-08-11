@@ -100,12 +100,11 @@ func BuildPlanModeReminder(planFilePath string, planExists bool, iteration int) 
 		planFileInfo += "\nNo plan file exists yet. You should create your plan at " + planFilePath + " using the WriteFile tool."
 	}
 
-	if iteration == 1 {
-		return fmt.Sprintf(planModeFullReminder, planFileInfo)
-	}
-
-	attachmentIndex := (iteration - 1) / reminderInterval
-	if attachmentIndex%reminderInterval == 0 {
+	// Send the full reminder on the first iteration and every reminderInterval iterations thereafter;
+	// intermediate iterations get the sparse version. Repeating the full text every turn is too
+	// token-expensive, but sending it only once causes the model to drift over time — periodic
+	// repetition strikes a balance between the two.
+	if (iteration-1)%reminderInterval == 0 {
 		return fmt.Sprintf(planModeFullReminder, planFileInfo)
 	}
 

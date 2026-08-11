@@ -23,16 +23,28 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/config"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/hooks"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/remote"
+	"github.com/hangtiancheng/swifty.go/swiftx/internal/try_cache"
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/tui"
 )
 
 func main() {
+	recordExit := try_cache.TryCatch()
+	defer recordExit()
+	// Persist the main goroutine's panic to disk before re-panicking; terminal output behavior is unchanged.
+	defer func() {
+		if r := recover(); r != nil {
+			try_cache.RecordPanic("main", r, debug.Stack())
+			panic(r)
+		}
+	}()
+
 	if args, ok := parseTeammateFlags(os.Args[1:]); ok {
 		if err := runTeammate(args); err != nil {
 			fmt.Fprintf(os.Stderr, "teammate: %s\n", err)
