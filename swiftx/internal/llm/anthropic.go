@@ -44,6 +44,23 @@ const anthropicStreamIdleTimeout = 5 * time.Minute
 // reverse dependency from llm to mcp.
 const nativeToolSearchBeta = "advanced-tool-use-2025-11-20"
 
+// markToolsForCache 把缓存断点打在最后一个非延迟工具上。
+//
+// tool schema 在多轮之间稳定，标记尾部就能把整个工具块缓存下来，几乎是免费的。但
+// 断点不能落在带 defer_loading 的工具上：一个工具同时带 defer_loading 和
+// cache_control 会被官方端点直接拒掉整个请求。MCP 工具在内建工具之后注册，排序后
+// 尾部往往正是延迟工具，所以必须从尾部往前找。内建工具永远不延迟，总能找到落点。
+func markToolsForCache(sdkTools []anthropic.ToolUnionParam) {
+	for i := len(sdkTools) - 1; i >= 0; i-- {
+		t := sdkTools[i].OfTool
+		if t == nil || t.DeferLoading.Valid() {
+			continue
+		}
+		t.CacheControl = anthropic.NewCacheControlEphemeralParam()
+		return
+	}
+}
+
 // needsToolSearchBeta checks whether any tool in this batch carries defer_loading.
 //
 // The beta header is only sent when actually needed: endpoints that do not
@@ -211,11 +228,7 @@ func (c *anthropicClient) Stream(ctx context.Context, conv *conversation.Manager
 			}
 		}
 		if len(sdkTools) > 0 {
-			// Tool schemas are stable across turns, so caching the entire
-			// tool block by marking the last one is essentially free.
-			if last := sdkTools[len(sdkTools)-1].OfTool; last != nil {
-				last.CacheControl = anthropic.NewCacheControlEphemeralParam()
-			}
+			markToolsForCache(sdkTools)
 			params.Tools = sdkTools
 		}
 

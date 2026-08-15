@@ -109,6 +109,7 @@
     "modelcontextprotocol",
     "mset",
     "MVCC",
+    "mypy",
     "nexts",
     "NOCONTENT",
     "nohup",

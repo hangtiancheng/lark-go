@@ -22,6 +22,7 @@ package tools
 
 import (
 	"context"
+	"sort"
 	"strings"
 )
 
@@ -171,6 +172,12 @@ func isOpenAIProtocol(protocol string) bool {
 	return protocol == "openai" || protocol == "openai-compat"
 }
 
+// GetAllSchemas 构建这一轮要发给模型的工具列表。
+//
+// 按工具名排序遍历，不直接遍历 map。Go 的 map 遍历顺序是随机的，不排序的话同一批
+// 工具每次序列化出来的数组顺序都不同，而工具列表渲染在系统提示词之后、消息之前，
+// 顺序一变整个块的字节就变了，它后面的对话历史缓存全部作废。内容没动、光顺序变，
+// 代价跟真加了一个工具一样。
 func (r *Registry) GetAllSchemas(protocol string) []map[string]any {
 	// Official endpoint uses native deferral: tools stay in tools[] with
 	// defer_loading and the server decides visibility. This way, even when
@@ -178,18 +185,22 @@ func (r *Registry) GetAllSchemas(protocol string) []map[string]any {
 	// prompt cache prefix is preserved. Other endpoints must hide deferred
 	// tools entirely and rely on McpCall.
 	native := r.McpLoadingMode == McpLoadingNative && !isOpenAIProtocol(protocol)
+	names := make([]string, 0, len(r.tools))
+	for name := range r.tools {
+		names = append(names, name)
+	}
+	sort.Strings(names)
 	schemas := make([]map[string]any, 0, len(r.tools))
-	for _, t := range r.tools {
-		// Search and dispatch are only exposed in modes that need them. Under
-		// eager there are no deferred tools to search and no dispatch needed;
-		// sending both would only waste tokens and might tempt the model into
-		// a needless detour.
-		if name := t.Name(); name == ToolSearchToolName && !r.ExposeToolSearch {
+	for _, name := range names {
+		t := r.tools[name]
+		// 检索和分发只在用得上的模式里发。eager 下没有延迟工具可搜、也不需要
+		// 分发，两个都发过去只是白占 token，还可能引诱模型去绕一圈。
+		if name == ToolSearchToolName && !r.ExposeToolSearch {
 			continue
 		} else if name == McpCallToolName && !r.ExposeMcpCall {
 			continue
 		}
-		deferred := isDeferred(t) && !r.discoveredTools[t.Name()]
+		deferred := isDeferred(t) && !r.discoveredTools[name]
 		if deferred && !native {
 			continue
 		}
@@ -216,6 +227,10 @@ func (r *Registry) GetAllSchemas(protocol string) []map[string]any {
 	return schemas
 }
 
+// GetDeferredToolNames 返回还没被捞出来的延迟工具名，按字典序。
+//
+// 排序不是为了好看：tools 是 map，不排的话每次调用顺序都不同，同一批工具会拼出
+// 不同的文本，调用方就没法靠比较判断这批工具到底变没变。
 func (r *Registry) GetDeferredToolNames() []string {
 	var names []string
 	for _, t := range r.tools {
@@ -223,6 +238,7 @@ func (r *Registry) GetDeferredToolNames() []string {
 			names = append(names, t.Name())
 		}
 	}
+	sort.Strings(names)
 	return names
 }
 

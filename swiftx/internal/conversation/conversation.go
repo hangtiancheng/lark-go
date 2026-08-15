@@ -130,6 +130,20 @@ func (m *Manager) AddSystemReminder(content string) {
 	})
 }
 
+// HasReminderContaining 报告历史里还有没有包含 marker 的提醒。
+//
+// 用来判断一条「只需要说一次」的提醒是否已经在上下文里。compact 会把历史压成
+// 摘要，原来那条提醒随之消失，这时候必须重发，否则模型再也看不到。调用方拿这个
+// 结果决定重发，就不用在 compact 那边额外挂钩子。
+func (m *Manager) HasReminderContaining(marker string) bool {
+	for _, msg := range m.history {
+		if msg.Role == "user" && strings.Contains(msg.Content, marker) {
+			return true
+		}
+	}
+	return false
+}
+
 func (m *Manager) InjectLongTermMemory(instructions, memories, skills string) {
 	if m.ltmInjected {
 		return

@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -108,7 +109,14 @@ type Agent struct {
 	// Used by /skills to show what's active and by RecoveryState to survive compaction.
 	// The body is injected once into the conversation as a message — NOT re-injected every turn.
 	activeSkills map[string]string
+	// announcedDeferred 是上一次告诉模型的延迟工具清单，按字典序。跟当前清单一比
+	// 就知道工具池有没有变，没变就不重发那条提醒。
+	announcedDeferred []string
 }
+
+// deferredReminderMarker 是延迟工具清单提醒的固定开头。用它在历史里回认这条提醒
+// 还在不在：compact 把历史压成摘要之后原来那条就没了，得重发一遍。
+const deferredReminderMarker = "The following deferred tools are available via ToolSearch."
 
 // ActivateSkill records a skill activation. The body is kept for /skills listing and compaction
 // recovery, but is NOT re-injected every turn — it lives in the conversation as a regular message.
@@ -249,14 +257,25 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 			// ToolSearch. In dispatch mode these tools never enter tools[], so the
 			// model must be explicitly told to invoke them via McpCall; otherwise
 			// it reads the schema but has no way to call the tool.
+			// 只在需要的时候发，不每轮重发。这条提醒是 append 进历史的，发过一次
+			// 就一直在上下文里，之后每轮再发一遍只是拿同样的内容占窗口：六十来个
+			// MCP 工具一份清单五百多 token，四十轮下来就是两万多。
+			//
+			// 两种情况要重发：池子变了（MCP 是异步连上的，服务器也可能掉线重连），
+			// 或者历史里那条已经被 compact 压掉了。后者靠回扫历史发现，这样就不用
+			// 在 compact 那边额外挂钩子。
 			if deferredNames := a.Registry.GetDeferredToolNames(); len(deferredNames) > 0 {
-				reminder := "The following deferred tools are available via ToolSearch. Their schemas are NOT loaded - use ToolSearch with query \"select:<name>[,<name>...]\" to load tool schemas"
-				if a.Registry.McpLoadingMode == tools.McpLoadingDispatch {
-					reminder += ", then invoke them with the McpCall tool"
-				} else {
-					reminder += " before calling them"
+				poolChanged := !slices.Equal(a.announcedDeferred, deferredNames)
+				if poolChanged || !conv.HasReminderContaining(deferredReminderMarker) {
+					reminder := deferredReminderMarker + " Their schemas are NOT loaded - use ToolSearch with query \"select:<name>[,<name>...]\" to load tool schemas"
+					if a.Registry.McpLoadingMode == tools.McpLoadingDispatch {
+						reminder += ", then invoke them with the mcp_call tool"
+					} else {
+						reminder += " before calling them"
+					}
+					conv.AddSystemReminder(reminder + ":\n" + strings.Join(deferredNames, "\n"))
+					a.announcedDeferred = deferredNames
 				}
-				conv.AddSystemReminder(reminder + ":\n" + strings.Join(deferredNames, "\n"))
 			}
 
 			a.emitHook(hooks.EventPreSend, "", nil)
