@@ -40,11 +40,12 @@ func schemaNames(schemas []map[string]any) string {
 	return strings.Join(out, ",")
 }
 
-// 工具列表的顺序必须在两次调用之间完全一致。
+// The tool list order must be identical across calls.
 //
-// tools 是 map，Go 的 map 遍历顺序是随机的。工具列表渲染在系统提示词之后、消息
-// 之前，顺序一变整个块的字节就变了，它后面的对话历史缓存全部作废——内容没动、光
-// 顺序变，代价跟真加了一个工具一样。
+// tools is a map and Go map iteration order is random. The tool list is rendered after the system
+// prompt and before messages; any order change alters the bytes of the entire block, invalidating
+// the conversation history cache that follows — the cost is the same as actually adding a tool,
+// even though the content is unchanged.
 func TestGetAllSchemasOrderIsStable(t *testing.T) {
 	reg := NewRegistry()
 	for i := 0; i < 20; i++ {
@@ -59,25 +60,25 @@ func TestGetAllSchemasOrderIsStable(t *testing.T) {
 	want := schemaNames(reg.GetAllSchemas("anthropic"))
 	for i := 0; i < 100; i++ {
 		if got := schemaNames(reg.GetAllSchemas("anthropic")); got != want {
-			t.Fatalf("第 %d 次调用顺序变了\n第一次: %s\n这一次: %s", i, want, got)
+			t.Fatalf("order changed on iteration %d\nfirst: %s\nthis:  %s", i, want, got)
 		}
 	}
 
-	// openai 协议也走同一条排序路径
+	// The openai protocol goes through the same sorting path.
 	wantOpenAI := schemaNames(reg.GetAllSchemas("openai"))
 	for i := 0; i < 20; i++ {
 		if got := schemaNames(reg.GetAllSchemas("openai")); got != wantOpenAI {
-			t.Fatalf("openai 协议下第 %d 次顺序变了", i)
+			t.Fatalf("openai protocol order changed on iteration %d", i)
 		}
 	}
 }
 
-// 缓存断点不能落在带 defer_loading 的工具上：官方端点不允许一个工具同时带
-// defer_loading 和 cache_control，会直接拒掉整个请求。
+// The cache breakpoint must not land on a tool with defer_loading: the official endpoint rejects
+// a request when a tool carries both defer_loading and cache_control.
 //
-// 这里断言的是排序之后 tools[] 里必然存在非延迟工具可以当落点，且尾部确实可能
-// 是延迟工具（也就是「直接标记最后一个」这种做法会踩雷）。真正打标记的逻辑在
-// internal/llm/anthropic.go。
+// This test asserts that after sorting, tools[] always contains a non-deferred tool that can
+// serve as the landing spot, and that the tail may indeed be a deferred tool (i.e. naively marking
+// the last element would fail). The actual marking logic lives in internal/llm/anthropic.go.
 func TestNonDeferredToolExistsForCacheMarker(t *testing.T) {
 	reg := NewRegistry()
 	for _, n := range []string{"ReadFile", "WriteFile", "Bash", "ToolSearch"} {
@@ -92,10 +93,11 @@ func TestNonDeferredToolExistsForCacheMarker(t *testing.T) {
 	schemas := reg.GetAllSchemas("anthropic")
 	lastDeferred, _ := schemas[len(schemas)-1]["defer_loading"].(bool)
 	if !lastDeferred {
-		t.Fatal("这批工具的排序结果里最后一个该是延迟工具，用例前提不成立了")
+		t.Fatal("test precondition broken: expected the last sorted tool to be deferred")
 	}
 
-	// 从尾部往前必须能找到一个非延迟的落点，这是 anthropic.go 的前提
+	// Scanning backward from the tail must find a non-deferred landing spot; this is the
+	// precondition relied upon by anthropic.go.
 	found := -1
 	for i := len(schemas) - 1; i >= 0; i-- {
 		if dl, _ := schemas[i]["defer_loading"].(bool); !dl {
@@ -104,9 +106,9 @@ func TestNonDeferredToolExistsForCacheMarker(t *testing.T) {
 		}
 	}
 	if found < 0 {
-		t.Fatal("找不到非延迟工具，缓存断点无处可放")
+		t.Fatal("no non-deferred tool found; nowhere to place the cache breakpoint")
 	}
 	if name := schemas[found]["name"].(string); strings.HasPrefix(name, MCPToolPrefix) {
-		t.Errorf("落点 %s 是 MCP 工具，不该被选中", name)
+		t.Errorf("landing spot %s is an MCP tool and should not be selected", name)
 	}
 }

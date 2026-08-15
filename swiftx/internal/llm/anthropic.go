@@ -44,12 +44,14 @@ const anthropicStreamIdleTimeout = 5 * time.Minute
 // reverse dependency from llm to mcp.
 const nativeToolSearchBeta = "advanced-tool-use-2025-11-20"
 
-// markToolsForCache 把缓存断点打在最后一个非延迟工具上。
+// markToolsForCache places the cache breakpoint on the last non-deferred tool.
 //
-// tool schema 在多轮之间稳定，标记尾部就能把整个工具块缓存下来，几乎是免费的。但
-// 断点不能落在带 defer_loading 的工具上：一个工具同时带 defer_loading 和
-// cache_control 会被官方端点直接拒掉整个请求。MCP 工具在内建工具之后注册，排序后
-// 尾部往往正是延迟工具，所以必须从尾部往前找。内建工具永远不延迟，总能找到落点。
+// Tool schemas are stable across turns, so marking the tail caches the entire tool block at
+// essentially no cost. However, the breakpoint must not land on a tool with defer_loading: a tool
+// carrying both defer_loading and cache_control causes the official endpoint to reject the entire
+// request. MCP tools are registered after built-in tools, so after sorting the tail is often a
+// deferred tool — hence the backward scan. Built-in tools are never deferred, so a valid landing
+// spot always exists.
 func markToolsForCache(sdkTools []anthropic.ToolUnionParam) {
 	for i := len(sdkTools) - 1; i >= 0; i-- {
 		t := sdkTools[i].OfTool

@@ -130,11 +130,11 @@ func (m *Manager) AddSystemReminder(content string) {
 	})
 }
 
-// HasReminderContaining 报告历史里还有没有包含 marker 的提醒。
-//
-// 用来判断一条「只需要说一次」的提醒是否已经在上下文里。compact 会把历史压成
-// 摘要，原来那条提醒随之消失，这时候必须重发，否则模型再也看不到。调用方拿这个
-// 结果决定重发，就不用在 compact 那边额外挂钩子。
+// HasReminderContaining reports whether a reminder containing the given marker still exists in
+// history. It is used to determine whether a "say-once" reminder is already present in context.
+// Compaction collapses history into a summary, removing the original reminder; in that case it
+// must be re-sent or the model will never see it again. Callers use this result to decide whether
+// to re-send, avoiding the need for a separate hook in the compaction path.
 func (m *Manager) HasReminderContaining(marker string) bool {
 	for _, msg := range m.history {
 		if msg.Role == "user" && strings.Contains(msg.Content, marker) {
