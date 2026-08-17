@@ -39,8 +39,11 @@ export default defineConfig([
     ],
     languageOptions: {
       globals: globals.browser,
-      // If eslint throws error, comment next line
-      tsconfigRootDir: import.meta.dirname,
+
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
     },
     rules: {
       "react-refresh/only-export-components": "warn",

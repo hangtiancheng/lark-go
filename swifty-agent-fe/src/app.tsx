@@ -76,6 +76,7 @@ export default function ChatApp() {
         type: "assistant",
         content: r.result,
         detail: r.detail,
+        ...(r.a2ui && r.a2ui.length > 0 ? { a2ui: r.a2ui } : {}),
       };
       addMessage(msg);
     }
