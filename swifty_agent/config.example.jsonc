@@ -26,7 +26,7 @@
     // Anthropic: SDK auto-appends /v1/messages, so base_url should NOT include /v1
     // OpenAI: base_url is used as-is, typically includes /v1
     "base_url": "https://ark.cn-beijing.volces.com/api/v3",
-    "model": "deepseek-v3-2-251201",
+    "model": "deepseek-v4-flash",
     "max_tokens": 4096,
     // Anthropic extended thinking (only effective when model_provider=anthropic)
     "thinking": false
