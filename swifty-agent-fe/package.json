@@ -18,6 +18,7 @@
     "@a2ui/markdown-it": "^0.1.1",
     "@a2ui/react": "^0.10.2",
     "@a2ui/web_core": "^0.10.6",
+    "@swifty.js/a2ui-shadcn": "file:../../a2ui/packages/shadcn",
     "@base-ui/react": "^1.6.0",
     "@fontsource-variable/geist": "^5.3.0",
     "@shadcn/react": "^0.3.0",
