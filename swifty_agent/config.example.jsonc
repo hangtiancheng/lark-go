@@ -4,7 +4,6 @@
 // fields and their defaults to facilitate migration from Next.js or to quickly
 // identify which fields need to be configured. The KEY=VALUE pairs below are
 // illustrative only — edit config.json for actual configuration.
-
 {
   // ---- Server ----
   "server_addr": ":8123",
@@ -16,10 +15,10 @@
     // Anthropic: SDK auto-appends /v1/messages, so base_url should NOT include /v1
     // OpenAI: base_url is used as-is, typically includes /v1
     "base_url": "https://ark.cn-beijing.volces.com/api",
-    "model": "deepseek-v3-2-251201",
+    "model": "deepseek-v4-flash",
     "max_tokens": 4096,
     // Anthropic extended thinking (only effective when model_provider=anthropic)
-    "thinking": false,
+    "thinking": false
   },
   // ---- Quick Model (chat/tool execution) ----
   "quick_chat_model": {
@@ -30,7 +29,7 @@
     "model": "deepseek-v3-2-251201",
     "max_tokens": 4096,
     // Anthropic extended thinking (only effective when model_provider=anthropic)
-    "thinking": false,
+    "thinking": false
   },
   // ---- Embedding ----
   "embedding_model": {
@@ -40,7 +39,7 @@
     "model": "text-embedding-v4",
     "dimensions": 2048,
     "ollama_base_url": "http://localhost:11434",
-    "ollama_model": "nomic-embed-text",
+    "ollama_model": "nomic-embed-text"
   },
   // ---- File Upload Directory ----
   "file_dir": "./data/docs",
@@ -52,15 +51,13 @@
   // injected into chat system prompt; takes effect only when both are non-empty
   "log_topic_region": "",
   "log_topic_id": "",
-
   // ---- Redis Stack (RediSearch) ----
   "redis": {
     "addr": "localhost:6379",
     "password": "",
-    "db": 0,
-  },
+    "db": 0
+  }
 }
-
 // The following are constants (aligned with Next.js); to change them, edit internal/consts/consts.go
 // REDIS_INDEX_NAME=idx:biz
 // REDIS_KEY_PREFIX=biz:
