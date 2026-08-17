@@ -32,3 +32,11 @@ scrape_configs:
   - job_name: "redis"
     static_configs:
       - targets: ["swifty-redis:6379"]
+
+  # swifty_agent runs on the host (go run .), not in compose; host.docker.internal
+  # lets the dockerized Prometheus reach it. Serves the swifty-sentry bridge
+  # metrics fed by the browser SDK via POST /api/log.
+  - job_name: "swifty-agent-go"
+    metrics_path: /api/metrics
+    static_configs:
+      - targets: ["host.docker.internal:8123"]

@@ -22,6 +22,7 @@
 
 import { createRoot } from "react-dom/client";
 import App from "./app";
+import { SentryProvider } from "./components/sentry-provider";
 import GalleryPage from "./gallery";
 import "./index.css";
 
@@ -29,5 +30,5 @@ import "./index.css";
 // selected by pathname at mount.
 const isGallery = window.location.pathname === "/gallery";
 createRoot(document.getElementById("root")!).render(
-  isGallery ? <GalleryPage /> : <App />,
+  <SentryProvider>{isGallery ? <GalleryPage /> : <App />}</SentryProvider>,
 );

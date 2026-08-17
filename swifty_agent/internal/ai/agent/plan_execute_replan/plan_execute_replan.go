@@ -65,8 +65,7 @@ func BuildPlanAgent(ctx context.Context, cfg *config.Config, query string) (stri
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: planExecuteAgent})
 	iter := runner.Query(ctx, query)
 
-	var lastContent string
-	var finalReport string
+	var lastMessage adk.Message
 	var detail []string
 	for {
 		event, ok := iter.Next()
@@ -75,29 +74,16 @@ func BuildPlanAgent(ctx context.Context, cfg *config.Config, query string) (stri
 		}
 		logger.L().Info("event")
 		prints.Event(event)
-		if event.Action != nil && event.Action.BreakLoop != nil {
-			// The replanner emits its final summary message immediately before
-			// the BreakLoopAction — that message is the report.
-			finalReport = lastContent
-			continue
-		}
 		if event.Output != nil {
-			msg, _, err := adk.GetMessage(event)
+			lastMessage, _, err = adk.GetMessage(event)
 			if err == nil {
-				lastContent = msg.Content
-				detail = append(detail, msg.String())
+				detail = append(detail, lastMessage.String())
 			}
 		}
 	}
 
-	if finalReport != "" {
-		return finalReport, detail, nil
-	}
-	if lastContent == "" {
+	if lastMessage == nil {
 		return "", nil, fmt.Errorf("no response generated")
 	}
-	// Iteration cap reached without a replanner summary — report the state
-	// honestly (mirrors the Next.js pipeline) instead of returning the last
-	// executor utterance as if it were the final report.
-	return "Max iterations reached", detail, nil
+	return lastMessage.Content, detail, nil
 }

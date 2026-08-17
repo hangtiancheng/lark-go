@@ -47,6 +47,8 @@ func New(cfg *config.Config) *App {
 	api.Post("/chat_stream", a.handleChatStream)
 	api.Post("/upload", a.handleFileUpload)
 	api.Post("/ai_ops", a.handleAIOps)
+	api.Post("/log", a.handleSentryLog)
+	api.Get("/metrics", a.handleMetrics)
 
 	return a
 }
