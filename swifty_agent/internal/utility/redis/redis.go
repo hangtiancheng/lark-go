@@ -28,6 +28,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/hangtiancheng/swifty.go/swifty_agent/internal/ai/embedder"
 	"github.com/hangtiancheng/swifty.go/swifty_agent/internal/config"
 	"github.com/hangtiancheng/swifty.go/swifty_agent/internal/consts"
 	"github.com/hangtiancheng/swifty.go/swifty_agent/internal/utility/logger"
@@ -62,29 +63,40 @@ func NewClient(ctx context.Context, cfg *config.Config) (*redis.Client, error) {
 }
 
 // ensureIndex verifies that the RediSearch vector index exists and that its
-// vector dimension matches the configured embedding dimension. If the index is
-// missing it is created; if the dimension differs (e.g. after switching the
-// embedding provider from openai-2048d to ollama-768d) the index is dropped
-// and recreated so searches do not silently fail. This mirrors the Next.js
-// ensureIndex dimension-check logic in lib/redis/client.ts.
+// vector dimension matches the actual embedding provider output. The dimension
+// is probed from the live provider (not taken from static config) so that
+// provider switches (openai ↔ ollama) or models whose output differs from
+// config are handled correctly. If the index is missing it is created; if the
+// dimension differs the index is dropped, stale hashes are purged, and the
+// index is recreated. This mirrors the Next.js ensureIndex logic in
+// lib/redis/client.ts.
 func ensureIndex(ctx context.Context, client *redis.Client, cfg *config.Config) error {
-	wantDim := cfg.EmbeddingModel.Dimensions
-	if wantDim == 0 {
-		wantDim = 2048
+	wantDim, err := embedder.ProbeDimension(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("probe embedding dimension: %w", err)
 	}
+	logger.L().Info("probed embedding dimension", "dim", wantDim)
 
+	needCreate := true
 	if info, err := client.Do(ctx, "FT.INFO", consts.RedisIndexName).Result(); err == nil {
-		// Index exists; verify the stored vector dimension.
 		if storedDim, ok := parseVectorDim(info); ok && storedDim != wantDim {
-			logger.L().Warn("redis index dimension mismatch; dropping and recreating", "stored", storedDim, "expected", wantDim)
+			logger.L().Warn("redis index dimension mismatch; dropping and recreating",
+				"stored", storedDim, "probed", wantDim)
 			if derr := client.Do(ctx, "FT.DROPINDEX", consts.RedisIndexName).Err(); derr != nil {
 				return fmt.Errorf("drop index on dimension mismatch: %w", derr)
 			}
-			// Fall through to recreate the index below.
+			// Purge stale hashes so RediSearch's background rescan does not
+			// resurrect old vectors that no longer match the new dimension.
+			if derr := deleteStaleHashes(ctx, client); derr != nil {
+				return fmt.Errorf("delete stale hashes: %w", derr)
+			}
 		} else {
-			// Dimension matches (or could not be parsed — keep the existing index).
-			return nil
+			needCreate = false
 		}
+	}
+
+	if !needCreate {
+		return nil
 	}
 
 	return client.Do(ctx, "FT.CREATE", consts.RedisIndexName,
@@ -98,6 +110,30 @@ func ensureIndex(ctx context.Context, client *redis.Client, cfg *config.Config) 
 		"DIM", strconv.Itoa(wantDim),
 		"DISTANCE_METRIC", "COSINE",
 	).Err()
+}
+
+// deleteStaleHashes scans all keys under the Redis key prefix and deletes them.
+// Called after a dimension mismatch to prevent old vectors (with the wrong
+// dimension) from being re-indexed. Mirrors the Next.js scanIterator cleanup
+// in lib/redis/client.ts.
+func deleteStaleHashes(ctx context.Context, client *redis.Client) error {
+	var cursor uint64
+	for {
+		keys, next, err := client.Scan(ctx, cursor, consts.RedisKeyPrefix+"*", 500).Result()
+		if err != nil {
+			return err
+		}
+		if len(keys) > 0 {
+			if err := client.Del(ctx, keys...).Err(); err != nil {
+				return err
+			}
+			logger.L().Info("purged stale hashes", "count", len(keys))
+		}
+		cursor = next
+		if cursor == 0 {
+			return nil
+		}
+	}
 }
 
 // parseVectorDim extracts the VECTOR field dimension from an FT.INFO result.

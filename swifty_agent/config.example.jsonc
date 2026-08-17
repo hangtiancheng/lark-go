@@ -32,12 +32,13 @@
     "thinking": false
   },
   // ---- Embedding ----
+  // The vector index dimension is probed from the embedding provider at
+  // startup, so no dimension configuration is needed.
   "embedding_model": {
     "provider": "openai", // "openai" | "ollama"
     "api_key": "your-api-key",
     "base_url": "https://openai.aliyuncs.com/compatible-mode/v1",
     "model": "text-embedding-v4",
-    "dimensions": 2048,
     "ollama_base_url": "http://localhost:11434",
     "ollama_model": "nomic-embed-text"
   },

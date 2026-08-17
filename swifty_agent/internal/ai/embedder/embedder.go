@@ -31,6 +31,7 @@ package embedder
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -54,7 +55,6 @@ func New(ctx context.Context, cfg *config.Config) (embedding.Embedder, error) {
 	}
 
 	var baseURL, apiKey, model string
-	var dims *int
 
 	switch provider {
 	case "ollama":
@@ -63,14 +63,10 @@ func New(ctx context.Context, cfg *config.Config) (embedding.Embedder, error) {
 		baseURL = strings.TrimRight(cfg.EmbeddingModel.OllamaBaseURL, "/") + "/v1"
 		apiKey = "ollama"
 		model = cfg.EmbeddingModel.OllamaModel
-		// Ollama dimension is determined by the model; do not send Dimensions.
-		dims = nil
 	default: // openai
 		baseURL = cfg.EmbeddingModel.BaseURL
 		apiKey = cfg.EmbeddingModel.APIKey
 		model = cfg.EmbeddingModel.Model
-		d := cfg.EmbeddingModel.Dimensions
-		dims = &d
 	}
 
 	encFmt := openai.EmbeddingEncodingFormatFloat
@@ -80,7 +76,6 @@ func New(ctx context.Context, cfg *config.Config) (embedding.Embedder, error) {
 		HTTPClient:     &http.Client{Timeout: 60 * time.Second},
 		Model:          model,
 		EncodingFormat: &encFmt,
-		Dimensions:     dims,
 	}
 
 	cli, err := openai.NewEmbeddingClient(ctx, ecfg)
@@ -93,4 +88,24 @@ func New(ctx context.Context, cfg *config.Config) (embedding.Embedder, error) {
 // EmbedStrings returns the embeddings for the given texts.
 func (e *Embedder) EmbedStrings(ctx context.Context, texts []string, opts ...embedding.Option) ([][]float64, error) {
 	return e.cli.EmbedStrings(ctx, texts, opts...)
+}
+
+// ProbeDimension returns the actual vector dimension produced by the configured
+// embedding provider. It creates a temporary embedder, embeds a short probe
+// string, and measures the output length. This is authoritative over any static
+// config value — the model's real output determines the RediSearch index DIM
+// (mirrors the Next.js ensureIndex probe in lib/redis/client.ts).
+func ProbeDimension(ctx context.Context, cfg *config.Config) (int, error) {
+	eb, err := New(ctx, cfg)
+	if err != nil {
+		return 0, fmt.Errorf("create probe embedder: %w", err)
+	}
+	vecs, err := eb.EmbedStrings(ctx, []string{"dimension probe"})
+	if err != nil {
+		return 0, fmt.Errorf("probe embedding: %w", err)
+	}
+	if len(vecs) == 0 || len(vecs[0]) == 0 {
+		return 0, fmt.Errorf("probe embedding returned empty vector")
+	}
+	return len(vecs[0]), nil
 }

@@ -90,16 +90,17 @@ type ChatModelConfig struct {
 	Thinking bool `json:"thinking"`
 }
 
-// EmbeddingConfig holds embedding model settings including dimension parameters.
+// EmbeddingConfig holds embedding model settings. The vector dimension is
+// probed from the live provider at startup (see embedder.ProbeDimension),
+// so no dimension configuration is needed.
 type EmbeddingConfig struct {
 	// Provider selects the embedding backend: "openai" (default) or "ollama".
 	Provider string `json:"provider"`
 
 	// OpenAI fields (OpenAI-compatible endpoint).
-	APIKey     string `json:"api_key"`
-	BaseURL    string `json:"base_url"`
-	Model      string `json:"model"`
-	Dimensions int    `json:"dimensions"`
+	APIKey  string `json:"api_key"`
+	BaseURL string `json:"base_url"`
+	Model   string `json:"model"`
 
 	// Ollama fields (OpenAI-compatible /v1/embeddings endpoint).
 	OllamaBaseURL string `json:"ollama_base_url"`
@@ -152,9 +153,6 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.PrometheusURL == "" {
 		cfg.PrometheusURL = "http://127.0.0.1:9090"
-	}
-	if cfg.EmbeddingModel.Dimensions == 0 {
-		cfg.EmbeddingModel.Dimensions = 2048
 	}
 	if cfg.EmbeddingModel.Provider == "" {
 		cfg.EmbeddingModel.Provider = "openai"
