@@ -28,7 +28,7 @@ import tseslint from "typescript-eslint";
 import { defineConfig, globalIgnores } from "eslint/config";
 
 export default defineConfig([
-  globalIgnores(["dist"]),
+  globalIgnores(["node_modules", "dist", "src/components/ui"]),
   {
     files: ["**/*.{ts,tsx}"],
     extends: [
@@ -39,7 +39,11 @@ export default defineConfig([
     ],
     languageOptions: {
       globals: globals.browser,
+      // If eslint throws error, comment next line
       tsconfigRootDir: import.meta.dirname,
+    },
+    rules: {
+      "react-refresh/only-export-components": "warn",
     },
   },
 ]);
