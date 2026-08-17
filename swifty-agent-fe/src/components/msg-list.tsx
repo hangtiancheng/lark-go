@@ -24,7 +24,7 @@ import { memo, useEffect, useRef } from "react";
 import type { ChatMessage } from "@/hooks/use-chat";
 import A2uiView from "./a2ui-view";
 import MdRender from "./md-render";
-import { Sparkles } from "lucide-react";
+import { LoaderCircle, Sparkles } from "lucide-react";
 
 interface MessageListProps {
   messages: ChatMessage[];
@@ -107,9 +107,13 @@ const MessageItem = memo(function MessageItem({
           </details>
         )}
         <div className="text-sm text-zinc-800">
-          <MdRender content={message.content} />
-          {streaming && (
-            <span className="ml-1 animate-pulse text-sky-500">|</span>
+          {message.pending ? (
+            <div className="flex items-center gap-2 py-1 text-zinc-400">
+              <LoaderCircle className="h-4 w-4 animate-spin" />
+              <span>Thinking...</span>
+            </div>
+          ) : (
+            <MdRender content={message.content} streaming={streaming} />
           )}
           {message.a2ui && message.a2ui.length > 0 && (
             <A2uiView messages={message.a2ui} onAction={onAction} />

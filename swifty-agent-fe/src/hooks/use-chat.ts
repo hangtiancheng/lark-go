@@ -39,6 +39,8 @@ export interface ChatMessage {
   /** A2UI protocol messages attached to an assistant reply (unknown[] at this
    * boundary; validated per-message by the web_core schema at render time). */
   a2ui?: unknown[];
+  /** Transient: reply not yet arrived — render a thinking placeholder. */
+  pending?: boolean;
 }
 
 export interface ChatHistory {
@@ -253,6 +255,12 @@ export function useChat() {
 
       try {
         if (mode === "quick") {
+          // Show a thinking placeholder until the reply arrives.
+          currentMsgs = [
+            ...currentMsgs,
+            { type: "assistant", content: "", pending: true },
+          ];
+          setMessages(currentMsgs);
           const resp = await fetch("/api/chat", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -265,7 +273,7 @@ export function useChat() {
           const a2ui = parsed.data.data?.a2ui;
           if (parsed.data.message === "OK" && answer) {
             currentMsgs = [
-              ...currentMsgs,
+              ...currentMsgs.slice(0, -1),
               {
                 type: "assistant",
                 content: answer,
@@ -291,7 +299,10 @@ export function useChat() {
           let full = "";
           let currentEvent = "";
           let dataLines: string[] = [];
-          currentMsgs = [...currentMsgs, { type: "assistant", content: "" }];
+          currentMsgs = [
+            ...currentMsgs,
+            { type: "assistant", content: "", pending: true },
+          ];
           setMessages(currentMsgs);
 
           // Dispatch one complete SSE event: per spec, multiple `data:` lines
@@ -386,14 +397,23 @@ export function useChat() {
         // AbortError: user navigated away — suppress the error message.
         if (e instanceof DOMException && e.name === "AbortError") return;
         const msg = e instanceof Error ? e.message : String(e);
-        currentMsgs = [
-          ...currentMsgs,
-          { type: "assistant", content: "Error: " + msg },
-        ];
+        const errorMsg: ChatMessage = {
+          type: "assistant",
+          content: "Error: " + msg,
+        };
+        // Replace a trailing thinking placeholder instead of appending after it.
+        currentMsgs = currentMsgs.at(-1)?.pending
+          ? [...currentMsgs.slice(0, -1), errorMsg]
+          : [...currentMsgs, errorMsg];
         setMessages(currentMsgs);
       } finally {
         setStreamController(null);
         setIsStreaming(false);
+        // Clear a leftover thinking placeholder (e.g. stream ended empty).
+        if (currentMsgs.at(-1)?.pending) {
+          currentMsgs = currentMsgs.slice(0, -1);
+          setMessages(currentMsgs);
+        }
         // P1-2 fix: upsertHistory is called with the local messages array,
         // NOT inside a setMessages state updater.
         if (!controller.signal.aborted && currentMsgs.length > 0) {
