@@ -32,7 +32,7 @@ import (
 
 	document_loaders "github.com/tmc/langchaingo/documentloaders"
 	"github.com/tmc/langchaingo/embeddings"
-	"github.com/tmc/langchaingo/llms/ollama"
+	"github.com/tmc/langchaingo/llms/openai"
 	"github.com/tmc/langchaingo/schema"
 	text_splitter "github.com/tmc/langchaingo/textsplitter"
 	vector_stores "github.com/tmc/langchaingo/vectorstores"
@@ -47,7 +47,7 @@ type Store struct {
 
 var _ vector_stores.VectorStore = (*Store)(nil)
 
-func New(llm *ollama.LLM) (*Store, error) {
+func New(llm *openai.LLM) (*Store, error) {
 	emb, err := embeddings.NewEmbedder(llm)
 	if err != nil {
 		return nil, fmt.Errorf("create embedder: %w", err)
@@ -172,7 +172,7 @@ type Registry struct {
 	emb    *embeddings.EmbedderImpl
 }
 
-func NewRegistry(llm *ollama.LLM) (*Registry, error) {
+func NewRegistry(llm *openai.LLM) (*Registry, error) {
 	emb, err := embeddings.NewEmbedder(llm)
 	if err != nil {
 		return nil, fmt.Errorf("create embedder: %w", err)

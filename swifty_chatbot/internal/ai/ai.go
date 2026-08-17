@@ -32,14 +32,14 @@ import (
 	"github.com/hangtiancheng/swifty.go/swifty_chatbot/internal/rag"
 	"github.com/hangtiancheng/swifty.go/swifty_chatbot/internal/store"
 	"github.com/tmc/langchaingo/llms"
-	"github.com/tmc/langchaingo/llms/ollama"
+	"github.com/tmc/langchaingo/llms/openai"
 	"github.com/tmc/langchaingo/schema"
 	vector_stores "github.com/tmc/langchaingo/vectorstores"
 )
 
 const (
-	ModelOllama    = "ollama"
-	ModelOllamaRAG = "ollama-rag"
+	ModelOpenAI    = "openai"
+	ModelOpenAIRAG = "openai-rag"
 )
 
 type Manager struct {
@@ -47,7 +47,7 @@ type Manager struct {
 	agents      map[string]map[string]*Agent
 	store       *store.Store
 	cfg         config.Config
-	llm         *ollama.LLM
+	llm         *openai.LLM
 	ragRegistry *rag.Registry
 }
 
@@ -57,23 +57,23 @@ type Agent struct {
 	Username    string
 	mu          sync.Mutex
 	messages    []model.Message
-	llm         *ollama.LLM
+	llm         *openai.LLM
 	ragRegistry *rag.Registry
 	store       *store.Store
 	cfg         config.Config
 }
 
 func NewManager(cfg config.Config, st *store.Store) *Manager {
-	llm, err := ollama.New(
-		ollama.WithModel(cfg.AIModelName),
-		ollama.WithServerURL(cfg.AIBaseURL),
+	llm, err := openai.New(
+		openai.WithModel(cfg.AIModelName),
+		openai.WithBaseURL(cfg.AIBaseURL),
 	)
 	if err != nil {
-		log.Fatalf("create ollama llm: %v", err)
+		log.Fatalf("create openai llm: %v", err)
 	}
-	embedLLM, err := ollama.New(
-		ollama.WithModel(cfg.AIEmbedModel),
-		ollama.WithServerURL(cfg.AIBaseURL),
+	embedLLM, err := openai.New(
+		openai.WithModel(cfg.AIEmbedModel),
+		openai.WithBaseURL(cfg.AIBaseURL),
 	)
 	if err != nil {
 		log.Printf("create embed llm failed (RAG disabled): %v", err)
@@ -95,7 +95,7 @@ func NewManager(cfg config.Config, st *store.Store) *Manager {
 }
 
 func (m *Manager) AddStoredMessage(username string, sessionID string, content string, isUser bool) {
-	agent := m.GetOrCreate(username, sessionID, ModelOllama)
+	agent := m.GetOrCreate(username, sessionID, ModelOpenAI)
 	agent.messages = append(agent.messages, model.Message{SessionID: sessionID, Username: username, Content: content, IsUser: isUser})
 }
 
@@ -240,7 +240,7 @@ func (a *Agent) buildLLMMessages(ctx context.Context, currentQuestion string) []
 		}
 	}
 
-	if a.ModelType == ModelOllamaRAG && a.ragRegistry != nil && len(msgs) > 0 {
+	if a.ModelType == ModelOpenAIRAG && a.ragRegistry != nil && len(msgs) > 0 {
 		userStore, err := a.ragRegistry.ForUser(ctx, a.Username)
 		if err != nil {
 			log.Printf("load rag store for user %s: %v", a.Username, err)

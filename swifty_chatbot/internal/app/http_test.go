@@ -131,7 +131,7 @@ func TestRegisterLoginAndAuthenticatedChat(t *testing.T) {
 	}
 	token := body["token"].(string)
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/ai/chat/create-session-and-send-message", strings.NewReader(`{"question":"hello","model_type":"ollama"}`))
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/ai/chat/create-session-and-send-message", strings.NewReader(`{"question":"hello","model_type":"openai"}`))
 	req.Header.Set("Authorization", "Bearer "+token)
 	engine.ServeHTTP(rec, req)
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
@@ -158,7 +158,7 @@ func TestStreamRoutesUseSSE(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/ai/chat/create-session-and-send-message-stream", strings.NewReader(`{"question":"hello","model_type":"ollama"}`))
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/ai/chat/create-session-and-send-message-stream", strings.NewReader(`{"question":"hello","model_type":"openai"}`))
 	req.Header.Set("Authorization", "Bearer "+token)
 	engine.ServeHTTP(rec, req)
 	if got := rec.Header().Get("Content-Type"); got != "text/event-stream" {
@@ -188,14 +188,14 @@ func TestSendMessageStreamToSession(t *testing.T) {
 
 	// create a session first
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/ai/chat/create-session-and-send-message", strings.NewReader(`{"question":"setup","model_type":"ollama"}`))
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/ai/chat/create-session-and-send-message", strings.NewReader(`{"question":"setup","model_type":"openai"}`))
 	req.Header.Set("Authorization", "Bearer "+token)
 	engine.ServeHTTP(rec, req)
 	json.Unmarshal(rec.Body.Bytes(), &body)
 	sessionID := body["session_id"].(string)
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/ai/chat/send-message-stream-2-session", strings.NewReader(fmt.Sprintf(`{"question":"again","model_type":"ollama","session_id":%q}`, sessionID)))
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/ai/chat/send-message-stream-2-session", strings.NewReader(fmt.Sprintf(`{"question":"again","model_type":"openai","session_id":%q}`, sessionID)))
 	req.Header.Set("Authorization", "Bearer "+token)
 	engine.ServeHTTP(rec, req)
 	if got := rec.Header().Get("Content-Type"); got != "text/event-stream" {
@@ -302,7 +302,7 @@ func TestRAGModelTypeIsAccepted(t *testing.T) {
 	}
 
 	rec = httptest.NewRecorder()
-	req = httptest.NewRequest(http.MethodPost, "/api/v1/ai/chat/create-session-and-send-message", strings.NewReader(`{"question":"hello","model_type":"ollama-rag"}`))
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/ai/chat/create-session-and-send-message", strings.NewReader(`{"question":"hello","model_type":"openai-rag"}`))
 	req.Header.Set("Authorization", "Bearer "+token)
 	engine.ServeHTTP(rec, req)
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {

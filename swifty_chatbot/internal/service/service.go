@@ -101,7 +101,7 @@ func (s *Services) CreateSession(ctx context.Context, username string, question 
 
 func (s *Services) Answer(ctx context.Context, username string, sessionID string, question string, modelType string) (string, code.Code) {
 	switch modelType {
-	case ai.ModelOllama, ai.ModelOllamaRAG:
+	case ai.ModelOpenAI, ai.ModelOpenAIRAG:
 	default:
 		return "", code.ModelNotFound
 	}
@@ -115,8 +115,8 @@ func (s *Services) Answer(ctx context.Context, username string, sessionID string
 
 func (s *Services) AnswerStream(ctx context.Context, username string, sessionID string, question string, modelType string, cb func(string)) error {
 	switch modelType {
-	case ai.ModelOllama:
-	case ai.ModelOllamaRAG:
+	case ai.ModelOpenAI:
+	case ai.ModelOpenAIRAG:
 	default:
 		return fmt.Errorf("unsupported model type: %s", modelType)
 	}

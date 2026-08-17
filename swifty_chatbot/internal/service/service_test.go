@@ -103,7 +103,7 @@ func TestAnswerRejectsUnsupportedModelType(t *testing.T) {
 
 func TestAnswerAcceptsRAGModelType(t *testing.T) {
 	srv := newTestServices(t)
-	_, result := srv.Answer(context.Background(), "user", "session", "hello", ai.ModelOllamaRAG)
+	_, result := srv.Answer(context.Background(), "user", "session", "hello", ai.ModelOpenAIRAG)
 	if result == code.ModelNotFound {
 		t.Fatalf("RAG model type should be accepted, got ModelNotFound")
 	}

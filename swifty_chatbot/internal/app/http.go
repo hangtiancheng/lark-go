@@ -347,7 +347,7 @@ func isValidQuestionWithSession(req questionRequest) bool {
 }
 
 func isSupportedModelType(modelType string) bool {
-	return modelType == ai.ModelOllama || modelType == ai.ModelOllamaRAG
+	return modelType == ai.ModelOpenAI || modelType == ai.ModelOpenAIRAG
 }
 
 func sessionsCacheKey(username string) string {
