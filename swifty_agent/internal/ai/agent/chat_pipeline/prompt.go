@@ -81,6 +81,7 @@ func buildSystemPrompt(cfg *config.Config) string {
 ## Output Requirements
   * Readable and well-structured with line breaks where necessary
   * Output markdown only
+{a2ui_section}
 ## Context Information
 - Current date: {date}
 - Related documents: |-

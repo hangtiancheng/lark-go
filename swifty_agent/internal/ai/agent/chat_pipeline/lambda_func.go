@@ -23,6 +23,8 @@ package chat_pipeline
 import (
 	"context"
 	"time"
+
+	"github.com/hangtiancheng/swifty.go/swifty_agent/internal/ai/a2ui"
 )
 
 // newInputToRagLambda extracts the query string from the UserMessage for use
@@ -39,5 +41,8 @@ func newInputToChatLambda(ctx context.Context, input *UserMessage, opts ...any) 
 		"content": input.Query,
 		"history": input.History,
 		"date":    time.Now().Format("1/2/2006, 3:04:05 PM"),
+		// Injected as a variable value: the section's literal JSON braces must
+		// never reach the FString template parser.
+		"a2ui_section": a2ui.PromptSection,
 	}, nil
 }

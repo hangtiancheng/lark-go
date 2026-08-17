@@ -60,7 +60,11 @@ export default function ChatContainer({
           </p>
         </div>
       ) : (
-        <MessageList messages={messages} isStreaming={isStreaming} />
+        <MessageList
+          messages={messages}
+          isStreaming={isStreaming}
+          onAction={onSend}
+        />
       )}
       <div className="w-full px-6 pb-5">
         <ChatInput

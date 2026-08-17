@@ -33,9 +33,9 @@
   },
   // ---- Embedding ----
   "embedding_model": {
-    "provider": "dashscope", // "dashscope" | "ollama"
+    "provider": "openai", // "openai" | "ollama"
     "api_key": "your-api-key",
-    "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "base_url": "https://openai.aliyuncs.com/compatible-mode/v1",
     "model": "text-embedding-v4",
     "dimensions": 2048,
     "ollama_base_url": "http://localhost:11434",

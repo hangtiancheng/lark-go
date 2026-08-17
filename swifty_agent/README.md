@@ -16,7 +16,7 @@ A Go-based AI-powered intelligent operations assistant, migrated from the Next.j
 - Go 1.25+ / [swifty_http](../swifty_http) HTTP framework
 - [Eino](https://github.com/cloudwego/eino) AI pipeline orchestration
 - Redis Stack (RediSearch vector search)
-- OpenAI / Anthropic Claude / DashScope / Ollama multi-provider support
+- OpenAI / Anthropic / Ollama multi-provider support
 
 ## Getting Started
 
@@ -35,7 +35,7 @@ go install github.com/air-verse/air@latest
 Edit [config.json](./config.json) and provide at minimum:
 
 - `think_chat_model.api_key` / `quick_chat_model.api_key` — LLM API key
-- `embedding_model.api_key` — DashScope API key
+- `embedding_model.api_key` — OpenAI API key
 
 See [.env.example](./.env.example) for a configuration field reference.
 
@@ -70,7 +70,7 @@ go run ./cmd/knowledge
 | `model_provider`                    | LLM provider: `openai` / `anthropic`                                                         | `openai`                    |
 | `think_chat_model`                  | Planning/replan model (supports `thinking` field to enable Anthropic extended thinking)      | —                           |
 | `quick_chat_model`                  | Chat/tool execution model                                                                    | —                           |
-| `embedding_model.provider`          | Embedding backend: `dashscope` / `ollama`                                                    | `dashscope`                 |
+| `embedding_model.provider`          | Embedding backend: `openai` / `ollama`                                                       | `openai`                    |
 | `embedding_model.dimensions`        | Vector dimensions (index must be rebuilt after switching providers; auto-detected by server) | `2048`                      |
 | `redis`                             | Redis Stack connection                                                                       | `localhost:6379`            |
 | `mcp_url`                           | MCP log tool SSE endpoint (gracefully degrades when unavailable)                             | `http://localhost:3000/sse` |
@@ -118,7 +118,7 @@ swifty_agent/
 │   │   ├── agent/               # Pipelines (chat/knowledge_index/plan_execute_replan)
 │   │   ├── tools/               # Tools (mysql/prometheus/mcp/docs/time)
 │   │   ├── models/              # LLM model factory (incl. Anthropic signature patching)
-│   │   ├── embedder/            # Embedding (dashscope/ollama)
+│   │   ├── embedder/            # Embedding (openai/ollama)
 │   │   ├── indexer/             # Redis vector indexer
 │   │   ├── retriever/           # Redis vector retriever
 │   │   └── loader/              # Document loader

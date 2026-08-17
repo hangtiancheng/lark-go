@@ -22,6 +22,12 @@
 
 import { createRoot } from "react-dom/client";
 import App from "./app";
+import GalleryPage from "./gallery";
 import "./index.css";
 
-createRoot(document.getElementById("root")!).render(<App />);
+// No router in this app: /gallery is a backend-free A2UI verification page
+// selected by pathname at mount.
+const isGallery = window.location.pathname === "/gallery";
+createRoot(document.getElementById("root")!).render(
+  isGallery ? <GalleryPage /> : <App />,
+);

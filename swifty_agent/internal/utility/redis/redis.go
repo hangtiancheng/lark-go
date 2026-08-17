@@ -64,7 +64,7 @@ func NewClient(ctx context.Context, cfg *config.Config) (*redis.Client, error) {
 // ensureIndex verifies that the RediSearch vector index exists and that its
 // vector dimension matches the configured embedding dimension. If the index is
 // missing it is created; if the dimension differs (e.g. after switching the
-// embedding provider from dashscope-2048d to ollama-768d) the index is dropped
+// embedding provider from openai-2048d to ollama-768d) the index is dropped
 // and recreated so searches do not silently fail. This mirrors the Next.js
 // ensureIndex dimension-check logic in lib/redis/client.ts.
 func ensureIndex(ctx context.Context, client *redis.Client, cfg *config.Config) error {

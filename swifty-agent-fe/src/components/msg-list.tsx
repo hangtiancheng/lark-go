@@ -22,17 +22,21 @@
 
 import { memo, useEffect, useRef } from "react";
 import type { ChatMessage } from "@/hooks/use-chat";
+import A2uiView from "./a2ui-view";
 import MdRender from "./md-render";
 import { Sparkles } from "lucide-react";
 
 interface MessageListProps {
   messages: ChatMessage[];
   isStreaming: boolean;
+  /** Receives serialized A2UI surface actions to auto-send as chat messages. */
+  onAction: (query: string) => void;
 }
 
 export default function MessageList({
   messages,
   isStreaming,
+  onAction,
 }: MessageListProps) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -48,6 +52,7 @@ export default function MessageList({
           streaming={
             isStreaming && i === messages.length - 1 && m.type === "assistant"
           }
+          onAction={onAction}
         />
       ))}
     </div>
@@ -59,9 +64,11 @@ export default function MessageList({
 const MessageItem = memo(function MessageItem({
   message,
   streaming,
+  onAction,
 }: {
   message: ChatMessage;
   streaming: boolean;
+  onAction: (query: string) => void;
 }) {
   if (message.type === "user") {
     return (
@@ -103,6 +110,9 @@ const MessageItem = memo(function MessageItem({
           <MdRender content={message.content} />
           {streaming && (
             <span className="ml-1 animate-pulse text-sky-500">|</span>
+          )}
+          {message.a2ui && message.a2ui.length > 0 && (
+            <A2uiView messages={message.a2ui} onAction={onAction} />
           )}
         </div>
       </div>

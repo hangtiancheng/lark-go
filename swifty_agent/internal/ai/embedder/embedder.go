@@ -23,7 +23,7 @@
 //
 // Two providers are supported via the OpenAI-compatible /v1/embeddings protocol
 // (both use the eino-ext libs/acl/openai client under the hood):
-//   - "dashscope" (default): Alibaba Bailian DashScope (text-embedding-v4, 2048d)
+//   - "openai" (default): OpenAI (text-embedding-v4)
 //   - "ollama": local Ollama instance (e.g. nomic-embed-text, 768d)
 //
 // This mirrors the Next.js lib/ai/embedder.ts provider switch.
@@ -50,7 +50,7 @@ type Embedder struct {
 func New(ctx context.Context, cfg *config.Config) (embedding.Embedder, error) {
 	provider := cfg.EmbeddingModel.Provider
 	if provider == "" {
-		provider = "dashscope"
+		provider = "openai"
 	}
 
 	var baseURL, apiKey, model string
@@ -65,7 +65,7 @@ func New(ctx context.Context, cfg *config.Config) (embedding.Embedder, error) {
 		model = cfg.EmbeddingModel.OllamaModel
 		// Ollama dimension is determined by the model; do not send Dimensions.
 		dims = nil
-	default: // dashscope
+	default: // openai
 		baseURL = cfg.EmbeddingModel.BaseURL
 		apiKey = cfg.EmbeddingModel.APIKey
 		model = cfg.EmbeddingModel.Model

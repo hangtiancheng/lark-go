@@ -92,10 +92,10 @@ type ChatModelConfig struct {
 
 // EmbeddingConfig holds embedding model settings including dimension parameters.
 type EmbeddingConfig struct {
-	// Provider selects the embedding backend: "dashscope" (default) or "ollama".
+	// Provider selects the embedding backend: "openai" (default) or "ollama".
 	Provider string `json:"provider"`
 
-	// DashScope fields (OpenAI-compatible endpoint).
+	// OpenAI fields (OpenAI-compatible endpoint).
 	APIKey     string `json:"api_key"`
 	BaseURL    string `json:"base_url"`
 	Model      string `json:"model"`
@@ -157,7 +157,7 @@ func applyDefaults(cfg *Config) {
 		cfg.EmbeddingModel.Dimensions = 2048
 	}
 	if cfg.EmbeddingModel.Provider == "" {
-		cfg.EmbeddingModel.Provider = "dashscope"
+		cfg.EmbeddingModel.Provider = "openai"
 	}
 	if cfg.EmbeddingModel.OllamaBaseURL == "" {
 		cfg.EmbeddingModel.OllamaBaseURL = "http://localhost:11434"

@@ -36,6 +36,9 @@ export interface ChatMessage {
   content: string;
   /** Optional step details for AI Ops results. */
   detail?: string[];
+  /** A2UI protocol messages attached to an assistant reply (unknown[] at this
+   * boundary; validated per-message by the web_core schema at render time). */
+  a2ui?: unknown[];
 }
 
 export interface ChatHistory {
@@ -68,6 +71,7 @@ const chatMessageSchema = z.object({
   type: z.enum(["user", "assistant"]),
   content: z.string(),
   detail: z.array(z.string()).optional(),
+  a2ui: z.array(z.unknown()).optional(),
 });
 
 const chatHistorySchema = z.object({
@@ -257,10 +261,15 @@ export function useChat() {
           const parsed = chatResponseSchema.safeParse(await resp.json());
           if (!parsed.success) throw new Error("invalid chat response");
           const answer = parsed.data.data?.answer;
+          const a2ui = parsed.data.data?.a2ui;
           if (parsed.data.message === "OK" && answer) {
             currentMsgs = [
               ...currentMsgs,
-              { type: "assistant", content: answer },
+              {
+                type: "assistant",
+                content: answer,
+                ...(a2ui && a2ui.length > 0 ? { a2ui } : {}),
+              },
             ];
             setMessages(currentMsgs);
           } else {
@@ -280,8 +289,66 @@ export function useChat() {
           let buffer = "";
           let full = "";
           let currentEvent = "";
+          let dataLines: string[] = [];
           currentMsgs = [...currentMsgs, { type: "assistant", content: "" }];
           setMessages(currentMsgs);
+
+          // Dispatch one complete SSE event: per spec, multiple `data:` lines
+          // belong to the same event and are joined with "\n" — this is how
+          // newlines inside streamed chunks survive the transport.
+          const dispatchEvent = () => {
+            if (dataLines.length === 0) {
+              currentEvent = "";
+              return;
+            }
+            const payload = dataLines.join("\n");
+            dataLines = [];
+            const event = currentEvent;
+            currentEvent = "";
+            if (event === "message") {
+              full += payload;
+              const last = currentMsgs.at(-1);
+              currentMsgs = [
+                ...currentMsgs.slice(0, -1),
+                {
+                  type: "assistant" as const,
+                  content: full,
+                  ...(last?.a2ui ? { a2ui: last.a2ui } : {}),
+                },
+              ];
+              setMessages(currentMsgs);
+            } else if (event === "a2ui") {
+              // Payload is a JSON array of A2UI protocol messages; contents
+              // are validated per-message by the web_core schema at render
+              // time, so treat them as unknown[] here.
+              try {
+                const messages = z
+                  .array(z.unknown())
+                  .min(1)
+                  .safeParse(JSON.parse(payload));
+                if (!messages.success)
+                  throw new Error("payload is not a non-empty array");
+                const last = currentMsgs.at(-1);
+                currentMsgs = [
+                  ...currentMsgs.slice(0, -1),
+                  {
+                    type: "assistant" as const,
+                    content: full,
+                    a2ui: [...(last?.a2ui ?? []), ...messages.data],
+                  },
+                ];
+                setMessages(currentMsgs);
+              } catch (err) {
+                console.error("invalid a2ui event payload:", err);
+              }
+            } else if (event === "error") {
+              // P1-3 fix: surface server-side error events instead of
+              // silently ignoring them.
+              throw new Error(payload || "Stream error");
+            }
+            // "done" event: clean termination — the reader will return
+            // done=true on the next read and the loop will break.
+          };
 
           while (true) {
             // Check abort before each read so unmount cancels promptly (P1-1 fix).
@@ -296,27 +363,20 @@ export function useChat() {
               const line = rawLine.endsWith("\r")
                 ? rawLine.slice(0, -1)
                 : rawLine;
+              // Blank line terminates the current event.
+              if (line === "") {
+                dispatchEvent();
+                continue;
+              }
               if (line.startsWith("id: ")) continue;
               if (line.startsWith("event: ")) {
                 currentEvent = line.slice(7);
                 continue;
               }
               if (line.startsWith("data: ")) {
-                const d = line.slice(6);
-                if (currentEvent === "message") {
-                  full += d === "" ? "\n" : d;
-                  currentMsgs = [
-                    ...currentMsgs.slice(0, -1),
-                    { type: "assistant" as const, content: full },
-                  ];
-                  setMessages(currentMsgs);
-                } else if (currentEvent === "error") {
-                  // P1-3 fix: surface server-side error events instead of
-                  // silently ignoring them.
-                  throw new Error(d || "Stream error");
-                }
-                // "done" event: clean termination — the reader will return
-                // done=true on the next read and the loop will break.
+                dataLines.push(line.slice(6));
+              } else if (line === "data:") {
+                dataLines.push("");
               }
             }
           }

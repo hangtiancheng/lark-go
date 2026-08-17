@@ -50,7 +50,7 @@ export default function MdRender({ content, className }: MdRenderProps) {
           );
         }
         const lang = match[1];
-        let html = text;
+        let html: string;
         try {
           html = hljs.getLanguage(lang)
             ? hljs.highlight(text, { language: lang }).value
