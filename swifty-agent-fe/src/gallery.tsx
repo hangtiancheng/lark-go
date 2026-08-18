@@ -2,7 +2,7 @@
 // component from a canned message set through the real catalog pipeline.
 // Reached via the pathname branch in main.tsx (no router in this app).
 import { useCallback, useMemo, useState } from "react";
-import A2uiView from "@/components/a2ui-view";
+import { A2uiView } from "@swifty.js/a2ui-shadcn";
 import { createGalleryMessages } from "./gallery-messages";
 
 export default function GalleryPage() {

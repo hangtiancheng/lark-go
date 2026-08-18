@@ -20,7 +20,8 @@
  * SOFTWARE.
  */
 
-"use client";
+// "use client";
+
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { z } from "zod/v4";
 import {

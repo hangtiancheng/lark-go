@@ -25,7 +25,8 @@
 @import "shadcn/tailwind.css";
 @import "@swifty.js/fonts/Swifty/Swifty.css";
 
-/*---break---
+/*
+ * ---break---
  */
 @custom-variant dark (&:is(.dark *));
 
@@ -52,7 +53,8 @@
     PingFang SC, Microsoft YaHei;
 }
 
-/*---break---
+/*
+ * ---break---
  */
 
 @theme inline {
@@ -98,7 +100,8 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/*---break---
+/*
+ * ---break---
  */
 
 :root {
@@ -138,7 +141,8 @@
   --sidebar-ring: oklch(0.708 0 0);
 }
 
-/*---break---
+/*
+ * ---break---
  */
 
 .dark {
@@ -175,7 +179,8 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
-/*---break---
+/*
+ * ---break---
  */
 
 @layer base {
