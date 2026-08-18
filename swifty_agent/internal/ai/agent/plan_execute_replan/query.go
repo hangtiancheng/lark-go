@@ -33,7 +33,8 @@ const AIOnOpsQuery = `1. You are an intelligent service alert analysis assistant
 5. For log queries, first use the log tool to retrieve relevant log information; parameters must include the region and log topic.
 6. Summarize and analyze the information retrieved for each alert, then generate an alert operations analysis report in Chinese (中文) in the following format:
 
-## 告警分析报告
+告警分析报告
+---
 
 # 告警处理详情
 

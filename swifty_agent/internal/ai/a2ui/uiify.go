@@ -2,6 +2,7 @@ package a2ui
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
@@ -16,16 +17,18 @@ import (
 // risk. Mirrors uiifyReport in the Next.js plan-execute-replan pipeline.
 func UiifyReport(ctx context.Context, cm model.BaseChatModel, report string) []any {
 	system := "You render A2UI surfaces for an OnCall assistant.\n" + PromptSection
-	question := "Below is an alert operations analysis report. If it presents structured data worth visualizing " +
-		"(alert lists, metric series, tabular results), reply with ONLY one A2UI block wrapped between " +
-		OpenTag + " and " + CloseTag + ".\n" +
-		"Rules:\n" +
-		"- The report is the ONLY source: visualize facts it states, copied verbatim — NEVER invent data.\n" +
-		"- Do not visualize intermediate execution chatter (e.g. current-time lookups) and never repeat the same data twice.\n" +
-		"- Never render empty tables or placeholder rows like \"(none)\" or \"—\".\n" +
-		"- Titles must be short noun phrases, not sentences; omit a Table caption when a heading already labels it.\n" +
-		"- If the report has nothing structured to render (e.g. zero active alerts, prose-only conclusions), reply with the single word NONE.\n\n" +
-		"Report:\n" + report
+	question := fmt.Sprintf(`Below is an alert operations analysis report. If it presents structured data worth visualizing (alert lists, metric series, tabular results), reply with ONLY one A2UI block wrapped between %s and %s.
+Rules:
+
+- The report is the ONLY source: visualize facts it states, copied verbatim — NEVER invent data.
+- Do not visualize intermediate execution chatter (e.g. current-time lookups) and never repeat the same data twice.
+- Never render empty tables or placeholder rows like "(none)" or "—".
+- Titles must be short noun phrases, not sentences; omit a Table caption when a heading already labels it.
+- If the report has nothing structured to render (e.g. zero active alerts, prose-only conclusions), reply with the single word NONE.
+
+Report:
+
+%s`, OpenTag, CloseTag, report)
 	resp, err := cm.Generate(ctx, []*schema.Message{
 		schema.SystemMessage(system),
 		schema.UserMessage(question),

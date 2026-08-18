@@ -1,5 +1,8 @@
 {
   "cSpell.words": [
+    "alertname",
+    "backticked",
+    "borderless",
     "cloudwego",
     "deepseek",
     "eino",
@@ -8,6 +11,7 @@
     "jsonschema",
     "nomic",
     "Ollama",
+    "Replanner",
     "swifty"
   ]
 }

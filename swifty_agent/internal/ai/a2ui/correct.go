@@ -2,6 +2,7 @@ package a2ui
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
@@ -22,10 +23,9 @@ func CorrectBlock(ctx context.Context, cm model.BaseChatModel, history []*schema
 	msgs = append(msgs,
 		schema.UserMessage(question),
 		schema.AssistantMessage(rawAnswer, nil),
-		schema.UserMessage(
-			"Your A2UI block was invalid: "+validationErr+
-				". Reply with ONLY the corrected JSON array of A2UI v0.9 messages wrapped between "+
-				OpenTag+" and "+CloseTag+" — no other text."),
+		schema.UserMessage(fmt.Sprintf(
+			"Your A2UI block was invalid: %s. Reply with ONLY the corrected JSON array of A2UI v0.9 messages wrapped between %s and %s — no other text.",
+			validationErr, OpenTag, CloseTag)),
 	)
 	resp, err := cm.Generate(ctx, msgs)
 	if err != nil {

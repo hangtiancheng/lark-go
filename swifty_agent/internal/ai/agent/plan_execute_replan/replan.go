@@ -146,8 +146,10 @@ Original Plan:
 
 Completed Steps:
 %s
+
 Results So Far:
 %s
+
 Based on the progress above, respond with ONLY a JSON object matching this schema:
 {
   "done": <boolean>,
