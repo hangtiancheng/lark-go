@@ -60,7 +60,7 @@ const useAuthStore = create<AuthState>((set) => ({
   userInfo: initialUser,
   isLoggedIn: !!initialUser.uuid,
   setUserInfo(info: UserInfo) {
-    info.avatar = resolveAvatar(info.avatar);
+    info.avatar = resolveAvatar(info.avatar, info.uuid);
     sessionStorage.setItem("userInfo", JSON.stringify(info));
     set({ userInfo: info, isLoggedIn: !!info.uuid });
   },

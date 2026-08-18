@@ -87,7 +87,7 @@ func Register(ctx context.Context, telephone, password, nickname string) (string
 		Telephone: telephone,
 		Password:  password,
 		Nickname:  nickname,
-		Avatar:    "https://vitejs.dev/logo.svg",
+		Avatar:    "",
 		CreatedAt: time.Now(),
 		IsAdmin:   0,
 		Status:    constant.UserStatusNormal,

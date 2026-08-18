@@ -145,7 +145,7 @@ export function SessionSidebar({ onChat }: SessionSidebarProps) {
       if (res.code !== 200) return;
       const list = ((res.data as SessionItem[]) || []).map((u) => ({
         ...u,
-        avatar: resolveAvatar(u.avatar),
+        avatar: resolveAvatar(u.avatar, u.user_id),
       }));
       useSessionStore.getState().setUserSessions(list);
     } finally {
@@ -162,7 +162,7 @@ export function SessionSidebar({ onChat }: SessionSidebarProps) {
       if (res.code !== 200) return;
       const list = ((res.data as SessionItem[]) || []).map((g) => ({
         ...g,
-        avatar: resolveAvatar(g.avatar),
+        avatar: resolveAvatar(g.avatar, g.group_id),
       }));
       useSessionStore.getState().setGroupSessions(list);
     } finally {

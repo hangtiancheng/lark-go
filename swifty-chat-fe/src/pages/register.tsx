@@ -81,11 +81,11 @@ export default function Register() {
       {/* Ambient soft-pink layers */}
       <div
         aria-hidden
-        className="bg-primary/10 pointer-events-none absolute -top-24 -right-32 h-96 w-96 animate-pulse rounded-full blur-3xl animation-duration-[8s] motion-reduce:animate-none"
+        className="bg-primary/10 animation-duration-[8s] pointer-events-none absolute -top-24 -right-32 h-96 w-96 animate-pulse rounded-full blur-3xl motion-reduce:animate-none"
       />
       <div
         aria-hidden
-        className="bg-primary/5 pointer-events-none absolute -bottom-40 -left-24 h-112 w-md animate-pulse rounded-full blur-3xl [animation-delay:2s] animation-duration-[10s] motion-reduce:animate-none"
+        className="bg-primary/5 animation-duration-[10s] pointer-events-none absolute -bottom-40 -left-24 h-112 w-md animate-pulse rounded-full blur-3xl [animation-delay:2s] motion-reduce:animate-none"
       />
       <div
         aria-hidden

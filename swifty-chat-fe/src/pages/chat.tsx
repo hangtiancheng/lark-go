@@ -150,7 +150,7 @@ export default function Chat() {
     if (res.code === 200 && res.data) {
       const list = ((res.data as Message[]) || []).map((m) => ({
         ...m,
-        send_avatar: resolveAvatar(m.send_avatar),
+        send_avatar: resolveAvatar(m.send_avatar, m.send_id),
       }));
       useChatStore.getState().setMessageList(list);
     }
@@ -163,7 +163,7 @@ export default function Chat() {
     });
     if (res.code !== 200 || !res.data) return;
     const info = res.data as ContactInfo;
-    info.contact_avatar = resolveAvatar(info.contact_avatar);
+    info.contact_avatar = resolveAvatar(info.contact_avatar, info.contact_id);
     useChatStore.getState().setContact(info);
 
     const sessionRes = await api.openSession({
@@ -229,7 +229,10 @@ export default function Chat() {
           message.receive_id === currentContactId);
 
       if (isRelevant) {
-        message.send_avatar = resolveAvatar(message.send_avatar);
+        message.send_avatar = resolveAvatar(
+          message.send_avatar,
+          message.send_id,
+        );
         useChatStore.getState().addMessage(message);
       }
     };
@@ -412,7 +415,7 @@ export default function Chat() {
     });
     const list = ((res.data as MemberRow[]) || []).map((m) => ({
       ...m,
-      avatar: resolveAvatar(m.avatar),
+      avatar: resolveAvatar(m.avatar, m.user_id),
     }));
     setMemberList(list);
     setRemoveMembersOpen(true);
