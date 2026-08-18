@@ -645,7 +645,7 @@ export default function Chat() {
 
           <VideoCall ref={videoCallRef} />
 
-          <div className="border-border flex h-[180px] border-t">
+          <div className="border-border flex h-45 border-t">
             <Textarea
               className="bg-card placeholder:text-muted-foreground/50 flex-1 resize-none rounded-none border-0 p-3 text-sm focus-visible:ring-0"
               placeholder="Type a message..."
