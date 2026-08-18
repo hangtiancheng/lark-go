@@ -1,5 +1,6 @@
 import { enablePlugin, init, isInitialized } from "@swifty.js/sentry";
 import { ExposurePlugin, PerformancePlugin } from "@swifty.js/sentry/plugins";
+import { startErrorSeeder } from "./crash/seeder.js";
 
 // dsn goes through the Vite dev proxy (/api → Go backend :8123), which
 // converts the reports into Prometheus metrics at GET /api/metrics.
@@ -22,4 +23,8 @@ export function setupSentry() {
       ),
   });
   enablePlugin(new PerformancePlugin(), new ExposurePlugin());
+
+  if (import.meta.env.DEV) {
+    startErrorSeeder();
+  }
 }

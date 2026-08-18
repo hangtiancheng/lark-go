@@ -133,9 +133,9 @@ export class ChatInput extends LitElement {
                     >
                       <button
                         @click=${() => {
-                        this._fileInput?.click();
-                        this._showTools = false;
-                      }}
+                          this._fileInput?.click();
+                          this._showTools = false;
+                        }}
                         class="flex w-48 items-center gap-3 rounded-lg px-3 py-2 text-sm text-zinc-800 hover:bg-zinc-100"
                       >
                         ${icon(Paperclip, "h-5 w-5")}
@@ -166,22 +166,22 @@ export class ChatInput extends LitElement {
                         class="absolute right-0 bottom-full mb-2 rounded-xl border border-zinc-200 bg-white p-1 shadow-lg"
                       >
                         ${MODES.map(
-                        (m) => html`
-                          <button
-                            @click=${() => {
+                          (m) => html`
+                            <button
+                              @click=${() => {
                               this.onModeChange?.(m);
                               this._showMode = false;
                             }}
-                            class="${
+                              class="${
                               m === this.mode
                                 ? "bg-sky-50 text-sky-600"
                                 : "text-zinc-800 hover:bg-zinc-100"
                             } block w-40 rounded-lg px-3 py-2 text-left text-sm"
-                          >
-                            ${m === "quick" ? "Quick" : "Stream"}
-                          </button>
-                        `,
-                      )}
+                            >
+                              ${m === "quick" ? "Quick" : "Stream"}
+                            </button>
+                          `,
+                        )}
                       </div>
                     `
                   : nothing

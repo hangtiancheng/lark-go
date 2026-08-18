@@ -1,4 +1,5 @@
 import { RandomCrash } from "@/crash";
+import { startErrorSeeder } from "@/crash/seeder";
 import { enablePlugin, init, isInitialized } from "@swifty.js/sentry";
 import { ExposurePlugin, PerformancePlugin } from "@swifty.js/sentry/plugins";
 import { ReactErrorBoundary } from "@swifty.js/sentry/react";
@@ -22,6 +23,10 @@ if (!isInitialized()) {
       ),
   });
   enablePlugin(new PerformancePlugin(), new ExposurePlugin());
+
+  if (import.meta.env.DEV) {
+    startErrorSeeder();
+  }
 }
 
 export function SentryProvider({ children }: { children: ReactNode }) {

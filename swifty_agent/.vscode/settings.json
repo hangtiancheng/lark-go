@@ -7,13 +7,24 @@
     "deepseek",
     "dockerized",
     "eino",
+    "eventloop",
+    "GOMAXPROCS",
     "gorm",
+    "goroutines",
     "hangtiancheng",
     "healthcheck",
     "jsonschema",
+    "longtask",
     "nomic",
     "Ollama",
+    "preemptible",
     "Replanner",
-    "swifty"
+    "sched",
+    "serialising",
+    "Shiki",
+    "swifty",
+    "syscall",
+    "syscalls",
+    "TTFB"
   ]
 }

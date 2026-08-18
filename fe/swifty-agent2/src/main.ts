@@ -5,6 +5,10 @@ import "./index.css";
 import "./components/chat-app.js";
 import "./gallery.js";
 
+if (import.meta.env.DEV) {
+  import("./crash/index.js");
+}
+
 setupSentry();
 
 // Port of the React use-location hook: notifies on popstate and on
@@ -59,9 +63,13 @@ export class AppRouter extends LitElement {
   }
 
   render() {
-    return this._pathname === "/gallery"
-      ? html`<gallery-page></gallery-page>`
-      : html`<chat-app></chat-app>`;
+    const page =
+      this._pathname === "/gallery"
+        ? html`<gallery-page></gallery-page>`
+        : html`<chat-app></chat-app>`;
+    return html`${page}${
+      import.meta.env.DEV ? html`<random-crash></random-crash>` : ""
+    }`;
   }
 }
 

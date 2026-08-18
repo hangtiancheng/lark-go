@@ -81,18 +81,20 @@ export class MsgList extends LitElement {
                     </summary>
                     <div class="mt-2 flex flex-col gap-2">
                       ${message.detail.map(
-                      (d, idx) => html`
-                        <div
-                          class="border-l-2 border-sky-400 bg-white p-2 text-xs text-zinc-700"
-                        >
-                          <strong class="text-sky-600">Step ${idx + 1}:</strong>
-                          <md-render
-                            .content=${d}
-                            .mdClass=${"max-w-none text-xs leading-relaxed wrap-break-word text-zinc-700"}
-                          ></md-render>
-                        </div>
-                      `,
-                    )}
+                        (d, idx) => html`
+                          <div
+                            class="border-l-2 border-sky-400 bg-white p-2 text-xs text-zinc-700"
+                          >
+                            <strong class="text-sky-600"
+                              >Step ${idx + 1}:</strong
+                            >
+                            <md-render
+                              .content=${d}
+                              .mdClass=${"max-w-none text-xs leading-relaxed wrap-break-word text-zinc-700"}
+                            ></md-render>
+                          </div>
+                        `,
+                      )}
                     </div>
                   </details>
                 `

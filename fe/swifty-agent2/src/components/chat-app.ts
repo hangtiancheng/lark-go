@@ -89,8 +89,8 @@ export class ChatApp extends LitElement {
           ? html`
               <div
                 class="${
-                NOTIFY_COLORS[chat.notification.type]
-              } fixed top-5 right-5 z-10000 max-w-xs rounded-lg p-4 text-sm font-medium text-white shadow-lg"
+                  NOTIFY_COLORS[chat.notification.type]
+                } fixed top-5 right-5 z-10000 max-w-xs rounded-lg p-4 text-sm font-medium text-white shadow-lg"
               >
                 ${chat.notification.message}
               </div>
