@@ -1,3 +1,4 @@
+import { RandomCrash } from "@/crash";
 import { enablePlugin, init, isInitialized } from "@swifty.js/sentry";
 import { ExposurePlugin, PerformancePlugin } from "@swifty.js/sentry/plugins";
 import { ReactErrorBoundary } from "@swifty.js/sentry/react";
@@ -36,6 +37,7 @@ export function SentryProvider({ children }: { children: ReactNode }) {
       }
     >
       {children}
+      <RandomCrash />
     </ReactErrorBoundary>
   );
 }
