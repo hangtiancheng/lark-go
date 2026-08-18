@@ -24,11 +24,19 @@ import { createRoot } from "react-dom/client";
 import App from "./app";
 import { SentryProvider } from "./components/sentry-provider";
 import GalleryPage from "./gallery";
+import { useLocation } from "./hooks/use-location";
 import "./index.css";
 
 // No router in this app: /gallery is a backend-free A2UI verification page
 // selected by pathname at mount.
-const isGallery = window.location.pathname === "/gallery";
+// eslint-disable-next-line react-refresh/only-export-components
+function Router() {
+  const { pathname } = useLocation();
+  return pathname === "/gallery" ? <GalleryPage /> : <App />;
+}
+
 createRoot(document.getElementById("root")!).render(
-  <SentryProvider>{isGallery ? <GalleryPage /> : <App />}</SentryProvider>,
+  <SentryProvider>
+    <Router />
+  </SentryProvider>,
 );

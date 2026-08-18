@@ -1,9 +1,5 @@
 import { enablePlugin, init, isInitialized } from "@swifty.js/sentry";
-import {
-  ExposurePlugin,
-  PerformancePlugin,
-  ScreenRecordPlugin,
-} from "@swifty.js/sentry/plugins";
+import { ExposurePlugin, PerformancePlugin } from "@swifty.js/sentry/plugins";
 import { ReactErrorBoundary } from "@swifty.js/sentry/react";
 import type { ReactNode } from "react";
 
@@ -24,11 +20,7 @@ if (!isInitialized()) {
         (item) => JSON.stringify(item).length <= MAX_EVENT_BYTES,
       ),
   });
-  enablePlugin(
-    new PerformancePlugin(),
-    new ScreenRecordPlugin(),
-    new ExposurePlugin(),
-  );
+  enablePlugin(new PerformancePlugin(), new ExposurePlugin());
 }
 
 export function SentryProvider({ children }: { children: ReactNode }) {

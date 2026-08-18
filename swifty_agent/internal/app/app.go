@@ -59,11 +59,11 @@ func (a *App) Engine() *swifty_http.Application {
 }
 
 // corsMiddleware adds CORS headers to all responses and handles preflight requests.
-// Methods/headers are restricted to POST+OPTIONS / Content-Type to match the
+// Methods/headers are restricted to GET+POST+OPTIONS / Content-Type to match the
 // Next.js route handlers (lib/api/* CORS_HEADERS).
 func corsMiddleware(ctx *swifty_http.Context, next func()) {
 	ctx.Set("Access-Control-Allow-Origin", "*")
-	ctx.Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	ctx.Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 	ctx.Set("Access-Control-Allow-Headers", "Content-Type")
 	if ctx.Method == http.MethodOptions {
 		ctx.Status = http.StatusNoContent
