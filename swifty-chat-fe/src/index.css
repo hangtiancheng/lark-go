@@ -28,9 +28,7 @@
 
 @theme inline {
   --font-heading: var(--font-sans);
-  --font-sans:
-    Iosevka, Maple Mono, Menlo, Cascadia Code, Sarasa Gothic SC, PingFang SC,
-    Microsoft YaHei, sans-serif;
+  --font-sans: Sarasa Gothic SC, PingFang SC, Microsoft YaHei, sans-serif;
   --font-mono:
     Iosevka, Maple Mono, Menlo, Cascadia Code, Sarasa Gothic SC, PingFang SC,
     Microsoft YaHei, monospace;

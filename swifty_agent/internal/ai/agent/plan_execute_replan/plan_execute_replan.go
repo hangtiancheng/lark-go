@@ -31,6 +31,7 @@ import (
 	"github.com/cloudwego/eino-examples/adk/common/prints"
 	"github.com/cloudwego/eino/adk"
 	plan_execute "github.com/cloudwego/eino/adk/prebuilt/planexecute"
+	"github.com/cloudwego/eino/schema"
 	"github.com/hangtiancheng/swifty.go/swifty_agent/internal/config"
 	"github.com/hangtiancheng/swifty.go/swifty_agent/internal/utility/logger"
 )
@@ -65,6 +66,8 @@ func BuildPlanAgent(ctx context.Context, cfg *config.Config, query string) (stri
 	runner := adk.NewRunner(ctx, adk.RunnerConfig{Agent: planExecuteAgent})
 	iter := runner.Query(ctx, query)
 
+	executorName := executeAgent.Name(ctx)
+
 	var lastMessage adk.Message
 	var detail []string
 	for {
@@ -74,11 +77,19 @@ func BuildPlanAgent(ctx context.Context, cfg *config.Config, query string) (stri
 		}
 		logger.L().Info("event")
 		prints.Event(event)
-		if event.Output != nil {
-			lastMessage, _, err = adk.GetMessage(event)
-			if err == nil {
-				detail = append(detail, lastMessage.String())
-			}
+		if event.Output == nil {
+			continue
+		}
+		msg, _, err := adk.GetMessage(event)
+		if err != nil {
+			continue
+		}
+		lastMessage = msg
+		// Detail mirrors the Next.js pipeline: only each step's final executor
+		// answer, as plain markdown. Planner/replanner JSON, tool-call turns and
+		// Message.String() debug dumps would render as garbage in the step list.
+		if event.AgentName == executorName && msg.Role == schema.Assistant && len(msg.ToolCalls) == 0 && msg.Content != "" {
+			detail = append(detail, msg.Content)
 		}
 	}
 
