@@ -37,7 +37,7 @@ export function SentryProvider({ children }: { children: ReactNode }) {
       }
     >
       {children}
-      <RandomCrash />
+      {import.meta.env.DEV && <RandomCrash />}
     </ReactErrorBoundary>
   );
 }
