@@ -39,7 +39,9 @@ Default port: `6379`. RedisInsight UI: `http://localhost:8001`.
 
 ### Prometheus & Grafana (monitoring, optional)
 
-**Option A: Docker**
+Scrape config and alert rules live in the repo as `prometheus.yml` and `prometheus.rules.yml`.
+
+**Option A: Docker** (both files are mounted into the container)
 
 ```bash
 docker compose up prometheus grafana -d
@@ -49,11 +51,14 @@ docker compose up prometheus grafana -d
 
 ```bash
 brew install prometheus grafana
+cp prometheus.rules.yml /opt/homebrew/etc/prometheus.rules.yml
 brew services start prometheus
 brew services start grafana
 ```
 
-Prometheus default port: `9090`. Grafana default port: `3000` (admin / pass).
+Prometheus runs without `--web.enable-lifecycle`, so `POST /-/reload` returns 403 — apply rule changes with `brew services restart prometheus`.
+
+Prometheus port: `9090`. Grafana port: `3001` under Docker (`3000` is the Next.js dev server that Prometheus scrapes), `3000` under Homebrew. Credentials: root / pass.
 
 ---
 
@@ -63,41 +68,28 @@ Prometheus default port: `9090`. Grafana default port: `3000` (admin / pass).
 - `POST /api/chat_stream` — SSE streaming chat
 - `POST /api/upload` — upload a file (.txt/.md) to the knowledge base
 - `POST /api/ai_ops` — AI Ops plan-execute-replan
+- `POST /api/log` — swifty-sentry report endpoint (the SDK `dsn`)
+- `GET /api/metrics` — Prometheus exposition endpoint
 
 ## Notes
 
 - On first use, upload a doc file via the "..." menu so the RAG knowledge base has content; otherwise retrieval returns empty.
 - Embeddings are stored as native Float32 vectors with COSINE similarity (HNSW index) in Redis Stack, providing higher search fidelity than the previous BinaryVector + HAMMING approach.
-- Tool definitions follow a three-layer split: `schemas.ts` (zod) → `operations.ts` (pure functions) → `index.ts` (AI SDK `tool` wrapper).
+- Each eino tool lives in its own file under `internal/ai/tools`.
 
-`/opt/homebrew/etc/prometheus.yml`
+## Monitoring
 
-```yml
-global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
+Pipeline: swifty-sentry browser SDK → `POST /api/log` → `internal/app/sentry_metrics_handler.go` → `GET /api/metrics` → Prometheus.
 
-rule_files:
-  - /opt/homebrew/etc/prometheus.rules.yml
+The bridge covers every SDK report type except ScreenRecord (errors and framework crashes, resource failures, HTTP, web vitals, navigation and resource timing, long tasks, browser memory, clicks, exposure, white screen, page views and dwell, custom events). Metric names, labels and buckets are deliberately identical to the Next.js bridge in `swifty-cli/apps/swifty-agent/lib/metrics.ts`, because one Prometheus scrapes both jobs and one rule file covers both. Browser-supplied label values are capped at 50 distinct values (overflow becomes `other`).
 
-scrape_configs:
-  - job_name: "prometheus"
-    static_configs:
-    - targets: ["localhost:9090"]
-  - job_name: "swifty-agent"
-    metrics_path: /api/metrics
-    static_configs:
-    - targets: ["127.0.0.1:3000"]
-  - job_name: "swifty-agent-go"
-    metrics_path: /api/metrics
-    static_configs:
-    - targets: ["127.0.0.1:8123"]
-```
+Runtime coverage opts the GoCollector into `runtime/metrics` for the GC, memory, scheduler, CPU-class, sync and cgo families — `go_sched_latencies_seconds` (the Go analogue of event loop lag), `go_sched_pauses_*`, `go_gc_pauses_seconds`, `go_memory_classes_*`, `go_cpu_classes_*` and `go_sync_mutex_wait_total_seconds_total`. `/godebug/*` is excluded as always-zero noise. Two derived gauges fill what the collectors lack: `swifty_go_memory_limit_bytes` and `swifty_go_heap_used_ratio` (0 when GOMEMLIMIT is unset).
 
-`/opt/homebrew/etc/prometheus.rules.yml`
+Alert rules are in `prometheus.rules.yml`. Alert names are a contract: the AI Ops pipeline calls `query_prometheus_alerts` and then `query_internal_docs` with the alert name, so every rule needs a matching heading in `data/docs/alert-handling-guide.md`. That file and the rules file are kept identical to the Next.js repo's copies.
 
-```yml
-groups: []
+```bash
+go test ./internal/app/          # event matrix, per-event values, malformed payloads
+promtool check rules prometheus.rules.yml
 ```
 
 ## Prompts

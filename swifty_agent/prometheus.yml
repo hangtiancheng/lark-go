@@ -18,25 +18,35 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# Prometheus scrape configuration
-# Scrapes Prometheus itself + Redis Stack (via redis_stack_host)
-# Note: the redis/redis-stack image does not include a built-in exporter;
-# to collect Redis metrics, run a separate redis_exporter container and add it to targets.
-# Currently only scrapes Prometheus itself for verification.
+# Prometheus scrape configuration.
+#
+# Both agents expose the same swifty_sentry_* metric names, so one rule file
+# (prometheus.rules.yml, mounted next to this config) covers both jobs.
+#
+# Redis is deliberately absent: the redis/redis-stack image speaks RESP on 6379
+# and ships no HTTP metrics endpoint, so scraping it can only ever fail. Run a
+# separate redis_exporter container and add it here to collect Redis metrics.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/prometheus.rules.yml
 
 scrape_configs:
   - job_name: "prometheus"
     static_configs:
       - targets: ["localhost:9090"]
 
-  - job_name: "redis"
-    static_configs:
-      - targets: ["swifty-redis:6379"]
-
-  # swifty_agent runs on the host (go run .), not in compose; host.docker.internal
-  # lets the dockerized Prometheus reach it. Serves the swifty-sentry bridge
-  # metrics fed by the browser SDK via POST /api/log.
+  # Both agents run on the host (go run . / next dev) rather than in compose;
+  # host.docker.internal lets the dockerized Prometheus reach them. Each serves
+  # the swifty-sentry bridge metrics fed by the browser SDK via POST /api/log.
   - job_name: "swifty-agent-go"
     metrics_path: /api/metrics
     static_configs:
       - targets: ["host.docker.internal:8123"]
+
+  - job_name: "swifty-agent"
+    metrics_path: /api/metrics
+    static_configs:
+      - targets: ["host.docker.internal:3000"]
