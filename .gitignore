@@ -205,3 +205,6 @@ swifty_agent/config.json
 
 .swifty/
 **/.swifty/
+
+.playwright-cli/
+**/.playwright-cli/

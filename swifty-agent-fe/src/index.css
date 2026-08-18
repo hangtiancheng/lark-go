@@ -23,18 +23,33 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
-@import "@fontsource-variable/geist";
+@import "@swifty.js/fonts/Swifty/Swifty.css";
+
 /*---break---
  */
 @custom-variant dark (&:is(.dark *));
 
+/* Let Tailwind detect the utility classes used inside packaged dist files. */
+@source "../node_modules/streamdown/dist/*.js";
+@source "../node_modules/@streamdown/code/dist/*.js";
+@source "../node_modules/@swifty.js/a2ui-shadcn/dist/**/*.js";
+
+/*
+ * Streamdown ships a pre-level background class with a syntax error
+ * (`bg-[var(--sdm-bg,inherit]`, missing paren), so Tailwind never generates
+ * it. Recreate the intended rule: Shiki sets --sdm-bg inline per theme.
+ */
+[data-streamdown="code-block-body"] pre {
+  background-color: var(--sdm-bg, transparent);
+}
+
 @theme {
   --font-sans:
-    var(--font-swifty), Swifty, Geist Mono, Menlo, Cascadia Code,
-    Sarasa Gothic SC, PingFang SC, Microsoft YaHei;
+    var(--font-swifty), Geist Mono, Menlo, Cascadia Code, Sarasa Gothic SC,
+    PingFang SC, Microsoft YaHei;
   --font-mono:
-    var(--font-swifty), Swifty, Geist Mono, Menlo, Cascadia Code,
-    Sarasa Gothic SC, PingFang SC, Microsoft YaHei;
+    var(--font-swifty), Geist Mono, Menlo, Cascadia Code, Sarasa Gothic SC,
+    PingFang SC, Microsoft YaHei;
 }
 
 /*---break---
@@ -87,6 +102,8 @@
  */
 
 :root {
+  /* Vite stand-in for next/font's Swifty variable ("Swifty Web" comes from Swifty.css). */
+  --font-swifty: "Swifty Web";
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
