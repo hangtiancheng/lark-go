@@ -3,7 +3,9 @@
     "cloudwego",
     "deepseek",
     "eino",
+    "gorm",
     "hangtiancheng",
+    "jsonschema",
     "nomic",
     "Ollama",
     "swifty"

@@ -32,8 +32,9 @@ import (
 )
 
 // QueryInternalDocsInput defines the input for the internal docs search tool.
+// Mirrors the Next.js zod schema: required query with the same description.
 type QueryInternalDocsInput struct {
-	Query string `json:"query" jsonschema:"description=The query string to search in internal documentation for relevant information and processing steps"`
+	Query string `json:"query" jsonschema:"required" jsonschema_description:"Query string used to retrieve internal documents"`
 }
 
 // queryInternalDocResult is the per-document result returned to the LLM.
@@ -53,13 +54,24 @@ func NewQueryInternalDocsTool(cfg *config.Config) (tool.InvokableTool, error) {
 		"query_internal_docs",
 		"Search internal documentation and knowledge base for relevant information. Performs RAG to find similar documents and extract processing steps. Useful for understanding internal procedures, best practices, or step-by-step guides.",
 		func(ctx context.Context, input *QueryInternalDocsInput, opts ...tool.Option) (string, error) {
+			// Runtime failures are returned as JSON error payloads (nil error) so the
+			// agent can reason about them instead of aborting the ReAct stream.
+			errPayload := func(err error) (string, error) {
+				b, _ := json.Marshal(map[string]any{
+					"success": false,
+					"error":   err.Error(),
+					"message": "Failed to search internal documentation",
+				})
+				return string(b), nil
+			}
+
 			rr, err := retriever.NewRedisRetriever(ctx, cfg)
 			if err != nil {
-				return "", fmt.Errorf("create retriever: %w", err)
+				return errPayload(fmt.Errorf("create retriever: %w", err))
 			}
 			resp, err := rr.Retrieve(ctx, input.Query)
 			if err != nil {
-				return "", fmt.Errorf("retrieve docs: %w", err)
+				return errPayload(fmt.Errorf("retrieve docs: %w", err))
 			}
 
 			// Map Eino documents to the {id, content, metadata} shape expected by
@@ -76,7 +88,7 @@ func NewQueryInternalDocsTool(cfg *config.Config) (tool.InvokableTool, error) {
 
 			b, err := json.Marshal(results)
 			if err != nil {
-				return "", fmt.Errorf("marshal docs: %w", err)
+				return errPayload(fmt.Errorf("marshal docs: %w", err))
 			}
 			return string(b), nil
 		},
