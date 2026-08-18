@@ -20,7 +20,7 @@
 
 # Swifty Agent multi-stage build
 # Build: docker build -t swifty-agent .
-# Run:   docker run -p 6872:6872 -v $(pwd)/config.json:/app/config.json swifty-agent
+# Run:   docker run -p 8123:8123 -v $(pwd)/config.json:/app/config.json swifty-agent
 
 # ---- Build stage ----
 FROM golang:1.25-alpine AS builder
@@ -54,6 +54,6 @@ COPY --from=builder /out/swifty-agent /app/swifty-agent
 # Default configuration (can be overridden via volume mount)
 COPY config.json /app/config.json
 
-EXPOSE 6872
+EXPOSE 8123
 
 ENTRYPOINT ["/app/swifty-agent"]

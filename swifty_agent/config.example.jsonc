@@ -14,7 +14,7 @@
     "api_key": "your-api-key",
     // Anthropic: SDK auto-appends /v1/messages, so base_url should NOT include /v1
     // OpenAI: base_url is used as-is, typically includes /v1
-    "base_url": "https://ark.cn-beijing.volces.com/api",
+    "base_url": "https://api.deepseek.com",
     "model": "deepseek-v4-flash",
     "max_tokens": 4096,
     // Anthropic extended thinking (only effective when model_provider=anthropic)
@@ -25,7 +25,7 @@
     "api_key": "your-api-key",
     // Anthropic: SDK auto-appends /v1/messages, so base_url should NOT include /v1
     // OpenAI: base_url is used as-is, typically includes /v1
-    "base_url": "https://ark.cn-beijing.volces.com/api/v3",
+    "base_url": "https://api.deepseek.com",
     "model": "deepseek-v4-flash",
     "max_tokens": 4096,
     // Anthropic extended thinking (only effective when model_provider=anthropic)
