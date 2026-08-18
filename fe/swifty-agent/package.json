@@ -1,5 +1,5 @@
 {
-  "name": "swifty-agent-fe",
+  "name": "swifty-agent",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -21,7 +21,7 @@
     "@base-ui/react": "^1.6.0",
     "@shadcn/react": "^0.3.0",
     "@streamdown/code": "^1.1.1",
-    "@swifty.js/a2ui-shadcn": "file:../../a2ui/packages/shadcn",
+    "@swifty.js/a2ui-shadcn": "file:../../../a2ui/packages/shadcn",
     "@swifty.js/fonts": "^0.0.1",
     "@swifty.js/sentry": "^0.0.5",
     "class-variance-authority": "^0.7.1",

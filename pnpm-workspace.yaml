@@ -20,6 +20,4 @@
 
 packages:
   # Workspace package paths. Glob patterns are supported
-  - swifty-agent-fe
-  - swifty-agent-fe2
-  - swifty-chat-fe
+  - fe/*
