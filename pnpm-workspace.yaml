@@ -20,4 +20,4 @@
 
 packages:
   # Workspace package paths. Glob patterns are supported
-  - fe/*
+  - apps/*
