@@ -1164,6 +1164,9 @@ func (m *Model) prefetchRelevantMemories(query string) <-chan string {
 	provider := m.selectedProvider
 	memDir := m.memoryMgr.Dir()
 	userMemDir := m.memoryMgr.UserDir()
+	// Capture the agent pointer before spawning the goroutine; inside the
+	// goroutine only its concurrency-safe methods are accessed.
+	ag := m.ag
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 		defer cancel()
@@ -1190,7 +1193,22 @@ func (m *Model) prefetchRelevantMemories(query string) <-chan string {
 			}
 			return sb.String(), nil
 		}
-		results, _ := memory.FindRelevantMemories(ctx, query, userMemDir, memDir, nil, nil, selector)
+		// Recently used tools let the selector skip their usage guides;
+		// already-injected memories are excluded outright to prevent the same
+		// entry from consuming a slot every turn.
+		var recentTools []string
+		var surfaced map[string]struct{}
+		if ag != nil {
+			recentTools, surfaced = ag.RecallHints()
+		}
+		results, _ := memory.FindRelevantMemories(ctx, query, userMemDir, memDir, recentTools, surfaced, selector)
+		if ag != nil && len(results) > 0 {
+			paths := make([]string, 0, len(results))
+			for _, r := range results {
+				paths = append(paths, r.Path)
+			}
+			ag.MarkMemoriesSurfaced(paths)
+		}
 		out <- renderRelevantMemoriesReminder(results)
 	}()
 	return out

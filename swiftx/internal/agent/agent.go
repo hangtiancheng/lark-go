@@ -29,6 +29,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/compact"
@@ -113,6 +114,68 @@ type Agent struct {
 	// order. Comparing it with the current list tells us whether the pool changed; if not,
 	// the reminder is not re-sent.
 	announcedDeferred []string
+	// recallMu guards the two fields below: tool execution writes from multiple
+	// goroutines, while memory recall prefetch reads and writes from its own.
+	recallMu sync.Mutex
+	// recentToolNames holds recently invoked tool names, deduplicated in call order.
+	// Passed to the memory recall selector so it skips usage-guide memories for
+	// these tools, while still surfacing pitfall and warning memories.
+	recentToolNames []string
+	// surfacedMemPaths records memory file paths already injected this session;
+	// pre-filtered before recall to avoid the same memory occupying a selector
+	// slot every turn.
+	surfacedMemPaths map[string]struct{}
+}
+
+// maxRecentTools is the upper bound on recent tool names passed to the memory recall selector.
+const maxRecentTools = 10
+
+// RecordRecentTool records a just-executed tool name. Re-invoking the same
+// tool moves it to the tail, so the list reflects most-recent-use order rather
+// than first-use order.
+func (a *Agent) RecordRecentTool(name string) {
+	if name == "" {
+		return
+	}
+	a.recallMu.Lock()
+	defer a.recallMu.Unlock()
+	if i := slices.Index(a.recentToolNames, name); i >= 0 {
+		a.recentToolNames = slices.Delete(a.recentToolNames, i, i+1)
+	}
+	a.recentToolNames = append(a.recentToolNames, name)
+	if len(a.recentToolNames) > maxRecentTools {
+		a.recentToolNames = a.recentToolNames[1:]
+	}
+}
+
+// RecallHints returns snapshots of the two pieces of state used by memory
+// recall: recently used tool names, and memory paths already injected this
+// session. The returned values are copies, safe for use in any goroutine.
+func (a *Agent) RecallHints() ([]string, map[string]struct{}) {
+	a.recallMu.Lock()
+	defer a.recallMu.Unlock()
+	tools := slices.Clone(a.recentToolNames)
+	surfaced := make(map[string]struct{}, len(a.surfacedMemPaths))
+	for p := range a.surfacedMemPaths {
+		surfaced[p] = struct{}{}
+	}
+	return tools, surfaced
+}
+
+// MarkMemoriesSurfaced records which memories were injected this turn so the
+// next recall excludes them first.
+func (a *Agent) MarkMemoriesSurfaced(paths []string) {
+	if len(paths) == 0 {
+		return
+	}
+	a.recallMu.Lock()
+	defer a.recallMu.Unlock()
+	if a.surfacedMemPaths == nil {
+		a.surfacedMemPaths = make(map[string]struct{}, len(paths))
+	}
+	for _, p := range paths {
+		a.surfacedMemPaths[p] = struct{}{}
+	}
 }
 
 // deferredReminderMarker is the fixed prefix of the deferred-tool reminder. It is used to check
@@ -685,6 +748,7 @@ func (a *Agent) executeSingleTool(ctx context.Context, eventCh chan AgentEvent, 
 	}
 
 	result := tool.Execute(ctx, tc.arguments)
+	a.RecordRecentTool(tc.toolName)
 
 	if !result.IsError && tc.toolName == "ReadFile" {
 		if p, _ := tc.arguments["file_path"].(string); p != "" {
