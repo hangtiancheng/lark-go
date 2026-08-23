@@ -3,101 +3,137 @@ name: swifty-orm
 description: >
   Knex-style chainable MongoDB ORM for Go (module
   github.com/hangtiancheng/swifty.go/swifty_orm). Use when Go code calls
-  swifty_orm.NewEngine, engine.Collection, engine.Model, the chainable Query
-  builder (Where equality/operator/object forms, WhereNot, WhereIn,
-  WhereNotIn, WhereNull, WhereNotNull, WhereBetween, WhereLike, WhereILike,
-  OrWhere and Or-variants, OrderBy, Limit, Offset, Select, Clone), terminal
-  methods (Insert, First, Find, Update, Upsert, Increment, Decrement, Delete,
-  Count, Exists, EnsureIndexes, DropCollection), aggregation (Sum, Avg, Min,
-  Max, Distinct, CountDistinct, Pluck), grouped aggregation (GroupBy, Having,
-  CountAs, SumAs, AvgAs, MinAs, MaxAs, Aggregate), streaming (Cursor, Each),
-  Transaction with auto session binding, NextSequence, CollectionName,
-  ErrNotFound, ErrCollectionRequired, or any import of the module. Also use
-  for Knex-style query chaining over MongoDB in Go. Do NOT use for GORM,
-  sqlx, ent, lark_orm, raw mongo-driver code without swifty_orm, or any
-  non-MongoDB datastore.
+  swifty_orm.NewEngine, engine.Collection, engine.Model, engine.Client,
+  engine.Database, engine.DatabaseName, engine.Close, engine.DropDatabase,
+  the chainable Query builder (Where equality/operator/object forms, WhereNot,
+  WhereIn, WhereNotIn, WhereNull, WhereNotNull, WhereBetween, WhereNotBetween,
+  WhereLike, WhereILike, OrWhere and Or-variants OrWhereNot/OrWhereIn/
+  OrWhereNotIn/OrWhereNull/OrWhereNotNull/OrWhereBetween, OrderBy, Limit,
+  Offset, Select, Clone), terminal methods (Insert, First, Find, Update,
+  Upsert, Increment, Decrement, Delete, Count, Exists, EnsureIndexes,
+  DropCollection) and their InsertResult/UpsertResult return structs,
+  aggregation (Sum, Avg, Min, Max, Distinct, CountDistinct, Pluck), grouped
+  aggregation (GroupBy, Having, CountAs, SumAs, AvgAs, MinAs, MaxAs,
+  Aggregate), streaming (Query.Cursor, Each, Cursor.Next, Cursor.Decode,
+  Cursor.Current, Cursor.Err, Cursor.Close), Transaction with auto session
+  binding, NextSequence, CollectionName, ErrNotFound, ErrCollectionRequired,
+  the logging helpers SetLevel/Info/Infof/Error/Errorf with InfoLevel/
+  ErrorLevel/Disabled, or any import of the module. Also use for Knex-style
+  query chaining over MongoDB in Go, for bson filter construction through this
+  builder, and for questions about builder mutation versus Clone semantics. Do
+  NOT use for GORM, sqlx, ent, lark_orm, raw mongo-driver code without
+  swifty_orm, or any non-MongoDB datastore.
 ---
 
 # swifty_orm
 
-A Knex-inspired, chainable query builder ORM for MongoDB in Go, built on the
-official `go.mongodb.org/mongo-driver`. The design philosophy is a faithful
-mapping of Knex.js query semantics onto MongoDB: all conditions on the same
-field AND-combine without silent overwrites, invalid builder input is recorded
-and surfaced as an error at execution time (never a panic), plain update
-documents are auto-wrapped in `$set`, and `Update` returns the matched count
-(Knex "affected rows" semantics). The package exposes two core abstractions:
-`Engine` (connection, transaction, and sequence management) and `Query`
-(mutable chainable builder with terminal, aggregation, grouping, and streaming
-methods). Flat layout, no sub-packages.
+A Knex-inspired, chainable query builder ORM for MongoDB in Go, built directly
+on the official `go.mongodb.org/mongo-driver`. The design philosophy is a
+faithful mapping of Knex.js query semantics onto MongoDB: conditions on the
+same field AND-combine without silent overwrites, invalid builder input is
+recorded and surfaced as an error at execution time rather than panicking,
+plain update documents are auto-wrapped in `$set`, and `Update` returns the
+matched count (Knex "affected rows" semantics). The package exposes three
+exported types: `Engine` (connection, transaction, and sequence management),
+`Query` (a mutable chainable builder with terminal, aggregation, grouping, and
+streaming methods), and `Cursor` (streaming iteration). Flat layout, no
+sub-packages.
 
 Module path: `github.com/hangtiancheng/swifty.go/swifty_orm`
 
 Source root: `swifty_orm/`
 
-Go toolchain: 1.26.0+
+Go directive: `go 1.26.0`
+
+## When to load adjacent skills
+
+Load `swifty-http` or `swifty-rpc` alongside this skill when wiring an `Engine`
+into a server process (construction at startup, request-context propagation,
+shutdown ordering). Load `swifty-cache` when layering a read-through cache in
+front of ORM reads. swifty_orm has no compile-time dependency on any sibling
+module; `go.mod` only carries `replace` directives for them.
 
 ## Architecture overview
 
 ```
-Engine (engine.go)
-  |-- client       *mongo.Client     (connect + ping at construction)
+Engine (engine.go)                     [connection + session + sequence owner]
+  |-- client       *mongo.Client       (mongo.Connect + Ping at construction)
   |-- database     *mongo.Database
   |-- databaseName string
-  |-- session      mongo.Session     (set only on Transaction sub-Engine)
+  |-- session      mongo.Session       (non-nil only on a Transaction sub-Engine)
   |
-  |-- Client() / Database() / DatabaseName()    [nil-safe accessors]
-  |-- Close(ctx) / DropDatabase(ctx)            [lifecycle]
-  |-- Collection(name) -> *Query                [entry to query builder]
-  |-- Model(value)     -> *Query                [Collection(CollectionName(v))]
-  |-- Transaction(ctx, fn)                      [session-scoped sub-Engine]
-  |-- NextSequence(ctx, name)                   ["counters" collection, $inc]
-  |-- sessionContext(ctx)                       [auto-binds tx session to ctx]
+  |-- Client() / Database() / DatabaseName()   [nil-receiver-safe accessors]
+  |-- Close(ctx) / DropDatabase(ctx)           [lifecycle, nil-safe no-ops]
+  |-- Collection(name) -> *Query               [entry point to the builder]
+  |-- Model(value)     -> *Query               [Collection(CollectionName(v))]
+  |-- Transaction(ctx, fn)                     [session-scoped sub-Engine]
+  |-- NextSequence(ctx, name) -> int64         ["counters" collection, $inc]
+  |-- sessionContext(ctx)                      [binds tx session onto ctx]
 
-Query (query.go; mutable, chainable; owns builder state + first error)
-  |-- collection   *mongo.Collection
-  |-- engine       *Engine            (for session binding via execCtx)
-  |-- conditions   []condition        <- Where family (AND chain)
-  |-- orGroups     [][]condition      <- OrWhere family ($or branches)
-  |-- sort         bson.D             <- OrderBy
-  |-- limit, skip  int64              <- Limit / Offset
-  |-- fields       []string           <- Select ("-" prefix = exclude)
-  |-- groupFields  []string           <- GroupBy
-  |-- havingConds  []condition        <- Having
-  |-- aggSpecs     []aggSpec          <- CountAs / SumAs / AvgAs / MinAs / MaxAs
-  |-- err          error              <- first builder error, surfaced at exec
+Query (query.go)                       [mutable, chainable; owns builder state]
+  |-- collection  *mongo.Collection    (nil => ErrCollectionRequired)
+  |-- engine      *Engine              (for session binding via execCtx)
+  |-- conditions  []condition          <- Where family (AND chain)
+  |-- orGroups    [][]condition        <- OrWhere family ($or branches)
+  |-- sort        bson.D               <- OrderBy (ordered, appended)
+  |-- limit, skip int64                <- Limit / Offset
+  |-- fields      []string             <- Select ("-" prefix = exclude)
+  |-- groupFields []string             <- GroupBy
+  |-- havingConds []condition          <- Having
+  |-- aggSpecs    []aggSpec            <- CountAs/SumAs/AvgAs/MinAs/MaxAs
+  |-- err         error                <- first builder error, surfaced at exec
   |
-  |-- [exec: query_exec.go]      Insert / First / Find / Update / Upsert /
-  |                              Increment / Decrement / Delete / Count /
-  |                              Exists / EnsureIndexes / DropCollection
-  |-- [aggregate: query_aggregate.go]  Sum / Avg / Min / Max / Distinct /
-  |                                    CountDistinct / Pluck
-  |-- [group: query_group.go]    GroupBy / Having / *As aliases / Aggregate
-  |-- [stream: query_stream.go]  Cursor / Each -> *Cursor
-  |-- Clone()                    deep copy of all builder state
+  |-- [exec: query_exec.go]       Insert / First / Find / Update / Upsert /
+  |                               Increment / Decrement / Delete / Count /
+  |                               Exists / EnsureIndexes / DropCollection
+  |-- [scalar: query_aggregate.go] Sum / Avg / Min / Max / Distinct /
+  |                               CountDistinct / Pluck
+  |-- [group: query_group.go]     GroupBy / Having / *As / Aggregate
+  |-- [stream: query_stream.go]   Cursor / Each  -> *Cursor
+  |-- Clone()                     independent deep copy of builder state
 
-Query pipeline at execution time:
-  preflight (collection bound? builder err? pending group state?)
-    -> buildFilter (conditions + orGroups -> bson.M)
-    -> buildProjection / findOptions (sort, limit, skip, projection)
-    -> execCtx (bind transaction session if any)
-    -> mongo-driver call
-
-Grouped aggregation pipeline (Aggregate):
-  $match(where) -> $group -> $project -> $match(having) -> $sort -> $skip -> $limit
-
-Cursor (query_stream.go)
+Cursor (query_stream.go)               [thin wrapper over *mongo.Cursor]
   |-- cursor *mongo.Cursor
-  |-- engine *Engine        (keeps getMore/killCursors on the tx session)
+  |-- engine *Engine                   (keeps getMore/killCursors on the session)
   |-- Next / Decode / Current / Err / Close
 
 Filter builder (filter.go)
+  |-- condition{field, op, value}, opAliases
   |-- parseWhere / parseWhereMap / normalizeOp / toBetweenPair / likeToRegex
-  |-- buildFilter / buildConditionFilter   [condition chain -> bson.M, $and fallback]
-  |-- buildProjection                      [fields -> inclusive/exclusive projection]
+  |-- buildFilter          [conditions + orGroups -> bson.M, $or composition]
+  |-- buildConditionFilter [condition slice -> bson.M, $and overflow]
+  |-- buildProjection      [fields -> inclusive/exclusive projection]
 
-Naming (naming.go):   CollectionName(value) -> snake_case plural collection name
-Logging (log.go):     Error / Errorf / Info / Infof, SetLevel, level constants
+Naming (naming.go):  CollectionName(value) -> snake_case pluralized name
+Logging (log.go):    Error / Errorf / Info / Infof, SetLevel, level constants
+```
+
+Query construction and execution flow:
+
+```
+engine.Collection("users")            -> &Query{collection, engine}
+  .Where(...)/.OrWhere(...)           -> append to conditions / orGroups (in place)
+  .OrderBy/.Limit/.Offset/.Select     -> mutate sort / limit / skip / fields
+  .Clone()                            -> independent copy (optional branch point)
+  .Find(ctx, &out)                    -> terminal
+        |
+        +-- preflight()               1. nil Query          -> ErrCollectionRequired
+        |                             2. q.err              -> builder error
+        |                             3. nil collection     -> ErrCollectionRequired
+        |                             4. pending group state -> error
+        +-- buildFilter()             conditions + orGroups -> bson.M
+        +-- findOptions()             sort / limit / skip / projection
+        +-- execCtx(ctx)              bind transaction session if the engine has one
+        +-- mongo-driver call         Find / FindOne / UpdateMany / ...
+```
+
+Grouped aggregation pipeline emitted by `Aggregate`:
+
+```
+$match(Where)  ->  $group  ->  $project  ->  $match(Having)  ->  $sort  ->  $skip  ->  $limit
+   (omitted        (always)     (drops _id,      (omitted        (only     (only     (only
+    if empty)                   surfaces keys     if empty)      if any    if > 0)   if > 0)
+                                and aliases)                     OrderBy)
 ```
 
 ## Core types
@@ -110,117 +146,142 @@ type Engine struct {
 }
 ```
 
-| Symbol       | Signature                                                                                                | Behavior                                                                                                                                                                                                                   |
-| ------------ | -------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| NewEngine    | `func NewEngine(ctx context.Context, uri string, database string) (*Engine, error)`                      | Connects and pings. Errors on empty/whitespace URI or database name, or connectivity failure. On ping failure the client is disconnected before return.                                                                    |
-| Client       | `func (e *Engine) Client() *mongo.Client`                                                                | Underlying driver client. Nil-receiver safe (returns nil).                                                                                                                                                                 |
-| Database     | `func (e *Engine) Database() *mongo.Database`                                                            | Active database handle. Nil-receiver safe.                                                                                                                                                                                 |
-| DatabaseName | `func (e *Engine) DatabaseName() string`                                                                 | Database name. Nil-receiver safe (returns "").                                                                                                                                                                             |
-| Collection   | `func (e *Engine) Collection(name string) *Query`                                                        | Starts a query. An empty/whitespace name (or nil engine/database) yields a Query whose execution methods return ErrCollectionRequired.                                                                                     |
-| Model        | `func (e *Engine) Model(value any) *Query`                                                               | Equivalent to `Collection(CollectionName(value))`.                                                                                                                                                                         |
-| Close        | `func (e *Engine) Close(ctx context.Context) error`                                                      | Disconnects the client. Nil-safe no-op.                                                                                                                                                                                    |
-| DropDatabase | `func (e *Engine) DropDatabase(ctx context.Context) error`                                               | Drops the entire database. Nil-safe no-op.                                                                                                                                                                                 |
-| NextSequence | `func (e *Engine) NextSequence(ctx context.Context, name string) (int64, error)`                         | Atomic counter via FindOneAndUpdate ($inc, upsert, ReturnDocument After) on the hard-coded `counters` collection. First call returns 1. Errors on empty name or uninitialized engine. Joins an active transaction session. |
-| Transaction  | `func (e *Engine) Transaction(ctx context.Context, fn func(sc context.Context, tx *Engine) error) error` | Starts a session and runs fn inside `session.WithTransaction`. fn receives the session context and a sub-Engine that carries the session. Returning nil commits; returning an error aborts.                                |
+The `Engine` has no exported fields and no option type: `NewEngine` takes the
+URI and database name positionally and applies no defaults beyond
+`options.Client().ApplyURI(uri)`. There is no way to inject custom
+`*options.ClientOptions`; construct a `*mongo.Client` yourself only if you are
+prepared to bypass this package entirely.
+
+| Symbol       | Signature                                                                                                | Behavior                                                                                                                                                                                                    |
+| ------------ | -------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| NewEngine    | `func NewEngine(ctx context.Context, uri string, database string) (*Engine, error)`                      | Validates that `uri` and `database` are non-blank after `strings.TrimSpace`, then `mongo.Connect` + `client.Ping(ctx, nil)`. On ping failure the client is disconnected before returning the error.           |
+| Client       | `func (e *Engine) Client() *mongo.Client`                                                                | Underlying driver client. Nil-receiver safe (returns nil).                                                                                                                                                  |
+| Database     | `func (e *Engine) Database() *mongo.Database`                                                            | Active database handle. Nil-receiver safe (returns nil).                                                                                                                                                    |
+| DatabaseName | `func (e *Engine) DatabaseName() string`                                                                 | Database name as passed to `NewEngine`. Nil-receiver safe (returns `""`).                                                                                                                                   |
+| Collection   | `func (e *Engine) Collection(name string) *Query`                                                        | Always returns a non-nil `*Query`. The collection is bound only when the engine, its database, and the trimmed name are all non-empty; otherwise execution methods return `ErrCollectionRequired`.           |
+| Model        | `func (e *Engine) Model(value any) *Query`                                                               | Exactly `e.Collection(CollectionName(value))`. A non-struct `value` yields `""` and therefore an unbound Query.                                                                                              |
+| Close        | `func (e *Engine) Close(ctx context.Context) error`                                                      | `client.Disconnect(ctx)`. Returns nil when the engine or client is nil.                                                                                                                                     |
+| DropDatabase | `func (e *Engine) DropDatabase(ctx context.Context) error`                                               | `database.Drop(ctx)`. Returns nil when the engine or database is nil.                                                                                                                                       |
+| NextSequence | `func (e *Engine) NextSequence(ctx context.Context, name string) (int64, error)`                          | `FindOneAndUpdate` with `$inc: {value: 1}`, `SetUpsert(true)`, `SetReturnDocument(options.After)` on the hard-coded `counters` collection keyed by `_id: name`. First call returns 1. Joins an active session. |
+| Transaction  | `func (e *Engine) Transaction(ctx context.Context, fn func(sc context.Context, tx *Engine) error) error` | Starts a session, defers `EndSession(ctx)`, runs `fn` inside `session.WithTransaction`. `fn` receives the session context and a sub-Engine carrying the session. Returning nil commits; an error aborts.     |
+
+Error cases that return plain `errors.New` values (not sentinels):
+`"mongo uri is required"`, `"mongo database is required"` from `NewEngine`;
+`"engine is not initialized"` from `NextSequence` and `Transaction` on a nil
+engine or nil database/client; `"sequence name is required"` from
+`NextSequence`.
 
 ### Query
 
-All chainable methods mutate the receiver and return the same `*Query`
-pointer. The first invalid builder input is recorded in an internal `err`
-field and returned by the next execution method (no panics, no silently
-broken filters).
+`Query` has no exported fields and no exported constructor: obtain one from
+`Engine.Collection`, `Engine.Model`, or `Query.Clone`. A zero-value `&Query{}`
+is usable for building and inspecting filters but has no collection, so every
+execution method returns `ErrCollectionRequired`.
 
-Condition methods (main AND chain):
+Every chainable method mutates the receiver in place and returns the same
+`*Query` pointer. See "Builder mutation versus cloning" below; this is the most
+important contract in the package.
 
-| Method          | Signature                                                             | Behavior                                                                                                                                                                                                                                   |
-| --------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Where           | `func (q *Query) Where(args ...any) *Query`                           | 1-arg: `bson.M`/`map[string]any`, one equality per key (keys processed in sorted order; nil value becomes a null check). 2-arg: equality (nil value becomes null check). 3-arg: `(field, op, value)`. Invalid args record a builder error. |
-| WhereNot        | `func (q *Query) WhereNot(field string, value any) *Query`            | `{field: {$ne: value}}`.                                                                                                                                                                                                                   |
-| WhereIn         | `func (q *Query) WhereIn(field string, values any) *Query`            | `$in`.                                                                                                                                                                                                                                     |
-| WhereNotIn      | `func (q *Query) WhereNotIn(field string, values any) *Query`         | `$nin`.                                                                                                                                                                                                                                    |
-| WhereNull       | `func (q *Query) WhereNull(field string) *Query`                      | `{field: nil}`.                                                                                                                                                                                                                            |
-| WhereNotNull    | `func (q *Query) WhereNotNull(field string) *Query`                   | `{field: {$ne: nil}}`.                                                                                                                                                                                                                     |
-| WhereBetween    | `func (q *Query) WhereBetween(field string, low, high any) *Query`    | `{$gte: low, $lte: high}`.                                                                                                                                                                                                                 |
-| WhereNotBetween | `func (q *Query) WhereNotBetween(field string, low, high any) *Query` | `{$not: {$gte: low, $lte: high}}`.                                                                                                                                                                                                         |
-| WhereLike       | `func (q *Query) WhereLike(field string, pattern string) *Query`      | SQL LIKE pattern (`%` any sequence, `_` one char) as an anchored, metacharacter-escaped `$regex`. Case-sensitive.                                                                                                                          |
-| WhereILike      | `func (q *Query) WhereILike(field string, pattern string) *Query`     | Same as WhereLike with regex option `i` (case-insensitive).                                                                                                                                                                                |
+Condition methods, main AND chain (query.go):
 
-Or-branch methods (each call appends one `$or` branch):
+| Method          | Signature                                                                | BSON produced / behavior                                                                                                                                                                                                                            |
+| --------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Where           | `func (q *Query) Where(args ...any) *Query`                              | 1 arg: `bson.M`/`map[string]any`, one equality condition per key, keys processed in `sort.Strings` order, a nil value becoming a null check. 2 args: `(field, value)` equality; nil value becomes a null check. 3 args: `(field, op, value)`. Invalid input records a builder error. |
+| WhereNot        | `func (q *Query) WhereNot(field string, value any) *Query`               | `{field: {$ne: value}}`.                                                                                                                                                                                                                            |
+| WhereIn         | `func (q *Query) WhereIn(field string, values any) *Query`               | `{field: {$in: values}}`. `values` is stored by reference and marshaled by the driver at execution time.                                                                                                                                             |
+| WhereNotIn      | `func (q *Query) WhereNotIn(field string, values any) *Query`            | `{field: {$nin: values}}`.                                                                                                                                                                                                                          |
+| WhereNull       | `func (q *Query) WhereNull(field string) *Query`                         | `{field: nil}` (a BSON null equality, which also matches missing fields).                                                                                                                                                                           |
+| WhereNotNull    | `func (q *Query) WhereNotNull(field string) *Query`                      | `{field: {$ne: nil}}`.                                                                                                                                                                                                                              |
+| WhereBetween    | `func (q *Query) WhereBetween(field string, low any, high any) *Query`   | `{field: {$gte: low, $lte: high}}`, inclusive on both ends.                                                                                                                                                                                         |
+| WhereNotBetween | `func (q *Query) WhereNotBetween(field string, low any, high any) *Query`| `{field: {$not: {$gte: low, $lte: high}}}`.                                                                                                                                                                                                         |
+| WhereLike       | `func (q *Query) WhereLike(field string, pattern string) *Query`         | `{field: {$regex: primitive.Regex{Pattern: "^...$"}}}` from `likeToRegex`. Case-sensitive.                                                                                                                                                           |
+| WhereILike      | `func (q *Query) WhereILike(field string, pattern string) *Query`        | Same as `WhereLike` with `Options: "i"`. Case-insensitive.                                                                                                                                                                                          |
 
-| Method         | Signature                                                            | Behavior                                                                                                                                                      |
-| -------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| OrWhere        | `func (q *Query) OrWhere(args ...any) *Query`                        | Same argument forms as Where. The object form makes a single branch whose keys AND-combine. An empty map is a no-op (an empty branch would match everything). |
-| OrWhereNot     | `func (q *Query) OrWhereNot(field string, value any) *Query`         | Branch with `$ne`.                                                                                                                                            |
-| OrWhereIn      | `func (q *Query) OrWhereIn(field string, values any) *Query`         | Branch with `$in`.                                                                                                                                            |
-| OrWhereNotIn   | `func (q *Query) OrWhereNotIn(field string, values any) *Query`      | Branch with `$nin`.                                                                                                                                           |
-| OrWhereNull    | `func (q *Query) OrWhereNull(field string) *Query`                   | Branch with null check.                                                                                                                                       |
-| OrWhereNotNull | `func (q *Query) OrWhereNotNull(field string) *Query`                | Branch with `{$ne: nil}`.                                                                                                                                     |
-| OrWhereBetween | `func (q *Query) OrWhereBetween(field string, low, high any) *Query` | Branch with `{$gte, $lte}`.                                                                                                                                   |
+Or-branch methods; each call appends exactly one `$or` branch (query.go):
 
-Modifier methods:
+| Method         | Signature                                                                  | Behavior                                                                                                                                                                            |
+| -------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| OrWhere        | `func (q *Query) OrWhere(args ...any) *Query`                              | Same argument forms as `Where`. The object form yields one branch whose keys AND-combine (Knex semantics). An empty map produces zero conditions and is skipped, because an empty branch would match every document. |
+| OrWhereNot     | `func (q *Query) OrWhereNot(field string, value any) *Query`               | Single-condition branch with `$ne`.                                                                                                                                                 |
+| OrWhereIn      | `func (q *Query) OrWhereIn(field string, values any) *Query`               | Single-condition branch with `$in`.                                                                                                                                                 |
+| OrWhereNotIn   | `func (q *Query) OrWhereNotIn(field string, values any) *Query`            | Single-condition branch with `$nin`.                                                                                                                                                |
+| OrWhereNull    | `func (q *Query) OrWhereNull(field string) *Query`                         | Single-condition branch with a null equality.                                                                                                                                       |
+| OrWhereNotNull | `func (q *Query) OrWhereNotNull(field string) *Query`                      | Single-condition branch with `{$ne: nil}`.                                                                                                                                          |
+| OrWhereBetween | `func (q *Query) OrWhereBetween(field string, low any, high any) *Query`   | Single-condition branch with `{$gte, $lte}`.                                                                                                                                        |
 
-| Method  | Signature                                                           | Behavior                                                                                                              |
-| ------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| OrderBy | `func (q *Query) OrderBy(field string, direction ...string) *Query` | Appends a sort key. Direction is trimmed and compared case-insensitively; "desc" descends, anything else ascends.     |
-| Limit   | `func (q *Query) Limit(n int64) *Query`                             | Applied only when n > 0.                                                                                              |
-| Offset  | `func (q *Query) Offset(n int64) *Query`                            | Applied only when n > 0. Honored by Find, First, Cursor/Each, Pluck, and Aggregate.                                   |
-| Select  | `func (q *Query) Select(fields ...string) *Query`                   | Sets the projection, replacing any previous one. Inclusive by default; a "-" prefix excludes a field (e.g. `"-_id"`). |
-| Clone   | `func (q *Query) Clone() *Query`                                    | Deep copy of all builder state (conditions, orGroups, sort, fields, group state, err). Nil-safe.                      |
+There is no `OrWhereLike`, `OrWhereILike`, or `OrWhereNotBetween`. Use
+`OrWhere(field, "ilike", pattern)` or `OrWhere(field, "not between", []any{lo, hi})`
+to reach those operators through the generic form.
+
+Modifier methods (query.go):
+
+| Method  | Signature                                                           | Behavior                                                                                                                                                        |
+| ------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| OrderBy | `func (q *Query) OrderBy(field string, direction ...string) *Query` | Appends a `bson.E` to `sort`, preserving call order. `direction[0]` is trimmed and compared with `strings.EqualFold` against `"desc"` for -1; anything else (including no argument and extra arguments beyond the first) yields 1. |
+| Limit   | `func (q *Query) Limit(n int64) *Query`                             | Stores `n` unconditionally; execution applies `SetLimit` only when `n > 0`, so `Limit(0)` and negative values mean "no limit".                                   |
+| Offset  | `func (q *Query) Offset(n int64) *Query`                            | Stores `n` unconditionally; execution applies `SetSkip` only when `n > 0`.                                                                                       |
+| Select  | `func (q *Query) Select(fields ...string) *Query`                   | Replaces the projection field list wholesale. Inclusive by default; a `-` prefix excludes. Assigns the variadic slice directly, so `Select(mySlice...)` aliases `mySlice`. |
+| Clone   | `func (q *Query) Clone() *Query`                                    | Independent copy of all builder state. Returns nil for a nil receiver. Shares the `collection` and `engine` pointers, which is intentional and safe.             |
 
 Execution methods (query_exec.go):
 
-| Method         | Signature                                                                                          | Behavior                                                                                                                                                                                                                                                                  |
-| -------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Insert         | `func (q *Query) Insert(ctx context.Context, documents ...any) (InsertResult, error)`              | A single slice/array argument is expanded into individual documents (`bson.D` and `[]byte` excluded). 1 doc uses InsertOne, 2+ use InsertMany. On partial InsertMany failure, returns the successfully inserted IDs alongside the error. Errors when no documents remain. |
-| First          | `func (q *Query) First(ctx context.Context, out any) error`                                        | FindOne honoring sort, offset, and projection (Limit is irrelevant). Returns ErrNotFound (alias of mongo.ErrNoDocuments) when nothing matches.                                                                                                                            |
-| Find           | `func (q *Query) Find(ctx context.Context, out any) error`                                         | Find + cursor.All; loads the entire result set into out.                                                                                                                                                                                                                  |
-| Update         | `func (q *Query) Update(ctx context.Context, update any) (int64, error)`                           | UpdateMany. Returns MatchedCount (Knex affected-rows semantics; includes matched-but-unchanged documents). Plain documents are auto-wrapped in `$set` (see normalizeUpdate).                                                                                              |
-| Upsert         | `func (q *Query) Upsert(ctx context.Context, update any) (UpsertResult, error)`                    | UpdateMany with upsert enabled. Inserts a document derived from the filter equalities plus the update when nothing matches.                                                                                                                                               |
-| Increment      | `func (q *Query) Increment(ctx context.Context, field string, amount ...int64) (int64, error)`     | `$inc` by amount (default 1). Returns matched count.                                                                                                                                                                                                                      |
-| Decrement      | `func (q *Query) Decrement(ctx context.Context, field string, amount ...int64) (int64, error)`     | `$inc` by -amount (default 1). Returns matched count.                                                                                                                                                                                                                     |
-| Delete         | `func (q *Query) Delete(ctx context.Context) (int64, error)`                                       | DeleteMany. Returns DeletedCount.                                                                                                                                                                                                                                         |
-| Count          | `func (q *Query) Count(ctx context.Context) (int64, error)`                                        | CountDocuments with the built filter.                                                                                                                                                                                                                                     |
-| Exists         | `func (q *Query) Exists(ctx context.Context) (bool, error)`                                        | `Count(ctx) > 0`.                                                                                                                                                                                                                                                         |
-| EnsureIndexes  | `func (q *Query) EnsureIndexes(ctx context.Context, indexes []mongo.IndexModel) ([]string, error)` | Indexes().CreateMany. No-op when the slice is empty.                                                                                                                                                                                                                      |
-| DropCollection | `func (q *Query) DropCollection(ctx context.Context) error`                                        | Drops the underlying collection.                                                                                                                                                                                                                                          |
+| Method         | Signature                                                                                           | Behavior                                                                                                                                                                                                                                                                            |
+| -------------- | --------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Insert         | `func (q *Query) Insert(ctx context.Context, documents ...any) (InsertResult, error)`               | A single slice/array argument is expanded into individual documents (`bson.D` and `[]byte`-kind element slices excluded). Exactly one document uses `InsertOne`, two or more use `InsertMany`. On partial `InsertMany` failure the successfully inserted IDs are returned alongside the error. Zero documents after expansion returns `"at least one document is required"`. |
+| First          | `func (q *Query) First(ctx context.Context, out any) error`                                         | `FindOne` honoring sort, offset, and projection. `Limit` is irrelevant. Returns `ErrNotFound` when nothing matches.                                                                                                                                                                  |
+| Find           | `func (q *Query) Find(ctx context.Context, out any) error`                                          | `Find` + `cursor.All(ctx, out)`; loads the whole result set. The cursor is closed via `defer`. Honors sort, limit, offset, projection.                                                                                                                                               |
+| Update         | `func (q *Query) Update(ctx context.Context, update any) (int64, error)`                            | `UpdateMany`. Returns `MatchedCount`, not `ModifiedCount`. Plain documents are auto-wrapped in `$set` by `normalizeUpdate`.                                                                                                                                                          |
+| Upsert         | `func (q *Query) Upsert(ctx context.Context, update any) (UpsertResult, error)`                     | `UpdateMany` with `SetUpsert(true)`. When nothing matches, MongoDB derives the new document from the filter's equality fields plus the update.                                                                                                                                       |
+| Increment      | `func (q *Query) Increment(ctx context.Context, field string, amount ...int64) (int64, error)`      | Delegates to `Update(ctx, bson.M{"$inc": bson.M{field: n}})` with `n = amount[0]` or 1. Returns the matched count.                                                                                                                                                                   |
+| Decrement      | `func (q *Query) Decrement(ctx context.Context, field string, amount ...int64) (int64, error)`      | Delegates to `Update` with `$inc: {field: -n}`. Returns the matched count.                                                                                                                                                                                                          |
+| Delete         | `func (q *Query) Delete(ctx context.Context) (int64, error)`                                        | `DeleteMany`. Returns `DeletedCount`.                                                                                                                                                                                                                                               |
+| Count          | `func (q *Query) Count(ctx context.Context) (int64, error)`                                         | `CountDocuments` with the built filter only. `Limit`, `Offset`, and `OrderBy` are ignored.                                                                                                                                                                                           |
+| Exists         | `func (q *Query) Exists(ctx context.Context) (bool, error)`                                         | `count, err := q.Count(ctx); return count > 0, err`. The error is returned together with the boolean, so check it.                                                                                                                                                                  |
+| EnsureIndexes  | `func (q *Query) EnsureIndexes(ctx context.Context, indexes []mongo.IndexModel) ([]string, error)`  | `Indexes().CreateMany`. Returns `(nil, nil)` when `indexes` is empty, after preflight.                                                                                                                                                                                              |
+| DropCollection | `func (q *Query) DropCollection(ctx context.Context) error`                                         | `collection.Drop(ctx)`.                                                                                                                                                                                                                                                             |
 
-Aggregation methods (query_aggregate.go):
+Scalar aggregation and extraction methods (query_aggregate.go):
 
-| Method        | Signature                                                                         | Behavior                                                                                                                                                                                                                                                                                           |
-| ------------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sum           | `func (q *Query) Sum(ctx context.Context, field string) (float64, error)`         | `[$match, $group {$sum}]` pipeline. Returns (0, nil) when no documents match.                                                                                                                                                                                                                      |
-| Avg           | `func (q *Query) Avg(ctx context.Context, field string) (float64, error)`         | `$avg`. Returns (0, nil) when no documents match.                                                                                                                                                                                                                                                  |
-| Min           | `func (q *Query) Min(ctx context.Context, field string) (float64, error)`         | `$min`. Non-numeric result values fail at decode into float64.                                                                                                                                                                                                                                     |
-| Max           | `func (q *Query) Max(ctx context.Context, field string) (float64, error)`         | `$max`. Non-numeric result values fail at decode into float64.                                                                                                                                                                                                                                     |
-| Distinct      | `func (q *Query) Distinct(ctx context.Context, field string) ([]any, error)`      | Collection.Distinct with the built filter. Caller must type-assert elements.                                                                                                                                                                                                                       |
-| CountDistinct | `func (q *Query) CountDistinct(ctx context.Context, field string) (int64, error)` | `len(Distinct(...))`.                                                                                                                                                                                                                                                                              |
-| Pluck         | `func (q *Query) Pluck(ctx context.Context, field string, out any) error`         | Collects one field's values into out, which must be a non-nil pointer to a slice of the value type (e.g. `*[]string`, `*[]int64`). Honors sort, limit, offset. Supports dotted field paths. Documents missing the field contribute the element zero value. Does not mutate the Query's projection. |
+| Method        | Signature                                                                         | Behavior                                                                                                                                                                                                                                                                     |
+| ------------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sum           | `func (q *Query) Sum(ctx context.Context, field string) (float64, error)`          | Pipeline `[{$match: filter}, {$group: {_id: nil, result: {$sum: "$field"}}}]`. Returns `(0, nil)` when no documents match. Ignores sort, limit, and offset.                                                                                                                    |
+| Avg           | `func (q *Query) Avg(ctx context.Context, field string) (float64, error)`          | Same pipeline with `$avg`. Returns `(0, nil)` when no documents match.                                                                                                                                                                                                        |
+| Min           | `func (q *Query) Min(ctx context.Context, field string) (float64, error)`          | Same pipeline with `$min`. Non-numeric results fail while decoding into `float64`.                                                                                                                                                                                            |
+| Max           | `func (q *Query) Max(ctx context.Context, field string) (float64, error)`          | Same pipeline with `$max`. Non-numeric results fail while decoding into `float64`.                                                                                                                                                                                            |
+| Distinct      | `func (q *Query) Distinct(ctx context.Context, field string) ([]any, error)`       | `collection.Distinct(ctx, field, filter)`. Callers must type-assert elements. Ignores sort, limit, and offset.                                                                                                                                                                 |
+| CountDistinct | `func (q *Query) CountDistinct(ctx context.Context, field string) (int64, error)`  | `int64(len(values))` from `Distinct`. Materializes all distinct values on the client.                                                                                                                                                                                          |
+| Pluck         | `func (q *Query) Pluck(ctx context.Context, field string, out any) error`          | Streams matching documents with projection `{field: 1, "_id": 0}` (the `_id: 0` is omitted when `field == "_id"`) and appends `bson.Raw.Lookup(path...)` values into `out`. `out` must be a non-nil pointer to a slice; blank `field` errors. Honors sort, limit, offset. Dotted paths are split on `.`. Documents lacking the field contribute the element zero value. Does not mutate `q.fields`. |
 
 Grouped aggregation methods (query_group.go):
 
-| Method    | Signature                                                       | Behavior                                                                                                                                                                                 |
-| --------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GroupBy   | `func (q *Query) GroupBy(fields ...string) *Query`              | Adds group keys. Empty field names record a builder error. Each key appears in result rows under its own name; dotted paths are flattened with underscores (`addr.city` -> `addr_city`). |
-| Having    | `func (q *Query) Having(args ...any) *Query`                    | Filters grouped rows. Same argument forms as Where. Must reference result column names (flattened group keys or aliases).                                                                |
-| CountAs   | `func (q *Query) CountAs(alias string) *Query`                  | Per-group document count (`{$sum: 1}`) under alias.                                                                                                                                      |
-| SumAs     | `func (q *Query) SumAs(field string, alias string) *Query`      | Per-group `$sum` of field under alias.                                                                                                                                                   |
-| AvgAs     | `func (q *Query) AvgAs(field string, alias string) *Query`      | Per-group `$avg`.                                                                                                                                                                        |
-| MinAs     | `func (q *Query) MinAs(field string, alias string) *Query`      | Per-group `$min`.                                                                                                                                                                        |
-| MaxAs     | `func (q *Query) MaxAs(field string, alias string) *Query`      | Per-group `$max`.                                                                                                                                                                        |
-| Aggregate | `func (q *Query) Aggregate(ctx context.Context, out any) error` | Builds and runs the group pipeline, decoding rows into out (pointer to slice). Result rows contain group keys and aliases as top-level fields; `_id` is projected away.                  |
+| Method    | Signature                                                       | Behavior                                                                                                                                                                            |
+| --------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| GroupBy   | `func (q *Query) GroupBy(fields ...string) *Query`              | Appends group keys. A blank field records a builder error and appends nothing from that call. Each key surfaces in result rows under its flattened name; dots become underscores (`addr.city` -> `addr_city`). |
+| Having    | `func (q *Query) Having(args ...any) *Query`                     | Filters grouped rows. Accepts the same argument forms as `Where`, but field names must be result column names (flattened group keys or accumulator aliases).                         |
+| CountAs   | `func (q *Query) CountAs(alias string) *Query`                   | Per-group `{$sum: 1}` under `alias`. Internally an `aggSpec` with an empty field.                                                                                                    |
+| SumAs     | `func (q *Query) SumAs(field string, alias string) *Query`        | Per-group `{$sum: "$field"}` under `alias`. Blank `field` records a builder error.                                                                                                   |
+| AvgAs     | `func (q *Query) AvgAs(field string, alias string) *Query`        | Per-group `{$avg: "$field"}` under `alias`.                                                                                                                                          |
+| MinAs     | `func (q *Query) MinAs(field string, alias string) *Query`        | Per-group `{$min: "$field"}` under `alias`.                                                                                                                                          |
+| MaxAs     | `func (q *Query) MaxAs(field string, alias string) *Query`        | Per-group `{$max: "$field"}` under `alias`.                                                                                                                                          |
+| Aggregate | `func (q *Query) Aggregate(ctx context.Context, out any) error`   | Uses `preflightBase` (so pending group state is allowed), builds the pipeline, runs `collection.Aggregate`, and decodes all rows via `cursor.All(ctx, out)`. `out` must be a pointer to a slice. |
 
-Alias validation (recorded as builder errors): alias must be non-empty, must
-not be `_id`, must not start with `$` or contain `.`. Pipeline validation
-(returned by Aggregate): GroupBy is required; `Select` cannot be combined with
-GroupBy; duplicate/colliding flattened group keys and aliases are rejected;
-Having and OrderBy may only reference result columns.
+Note the parameter order of the `*As` methods: field first, alias second.
+`CountAs` takes only an alias.
+
+Alias validation happens at call time and records a builder error: the alias
+must be non-blank, must not equal `_id`, must not start with `$`, and must not
+contain `.`. Pipeline-level validation happens inside `Aggregate` and is
+returned directly rather than stored: `GroupBy` is required, `Select` cannot be
+combined with `GroupBy`, flattened group keys must be unique, aliases must not
+collide with group keys or with each other, and every `Having` field and
+`OrderBy` key must be a known result column.
 
 Streaming methods (query_stream.go):
 
-| Method | Signature                                                                   | Behavior                                                                                                                                                                  |
-| ------ | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Cursor | `func (q *Query) Cursor(ctx context.Context) (*Cursor, error)`              | Executes Find and returns a streaming Cursor honoring filter, sort, limit, offset, and projection. Caller must Close it.                                                  |
-| Each   | `func (q *Query) Each(ctx context.Context, fn func(c *Cursor) error) error` | Streams every matching document through fn, stopping at (and returning) the first error. Closes the cursor automatically. Returns the cursor's iteration error otherwise. |
+| Method | Signature                                                                   | Behavior                                                                                                                                                                                    |
+| ------ | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Cursor | `func (q *Query) Cursor(ctx context.Context) (*Cursor, error)`               | Runs `Find` with the same `findOptions` as `Find` (sort, limit, offset, projection) and wraps the driver cursor. The caller owns closing it.                                                 |
+| Each   | `func (q *Query) Each(ctx context.Context, fn func(c *Cursor) error) error`  | Opens a cursor, defers `Close(ctx)`, calls `fn` per document, returns the first `fn` error immediately, otherwise returns `cursor.Err()`. `fn` receives the `*Cursor` itself, not a decoded value. |
 
 ### Cursor
 
@@ -230,17 +291,21 @@ type Cursor struct {
 }
 ```
 
-| Method  | Signature                                           | Behavior                                                                       |
-| ------- | --------------------------------------------------- | ------------------------------------------------------------------------------ |
-| Next    | `func (c *Cursor) Next(ctx context.Context) bool`   | Advances to the next document; false at end of stream or on error (check Err). |
-| Decode  | `func (c *Cursor) Decode(out any) error`            | Unmarshals the current document into out.                                      |
-| Current | `func (c *Cursor) Current() bson.Raw`               | Raw BSON of the current document.                                              |
-| Err     | `func (c *Cursor) Err() error`                      | Error that terminated iteration, if any.                                       |
-| Close   | `func (c *Cursor) Close(ctx context.Context) error` | Releases the server-side cursor.                                               |
+| Method  | Signature                                           | Behavior                                                                              |
+| ------- | --------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| Next    | `func (c *Cursor) Next(ctx context.Context) bool`   | Advances one document; false at end of stream or on error. Check `Err` afterwards.     |
+| Decode  | `func (c *Cursor) Decode(out any) error`            | Unmarshals the current document into `out`. Does not bind the session (no I/O).        |
+| Current | `func (c *Cursor) Current() bson.Raw`               | Raw BSON of the current document, valid until the next `Next` call.                    |
+| Err     | `func (c *Cursor) Err() error`                      | The error that terminated iteration, if any.                                          |
+| Close   | `func (c *Cursor) Close(ctx context.Context) error` | Releases the server-side cursor. Safe to call after a partial iteration.               |
 
-Next and Close bind the transaction session to ctx when the Cursor was opened
-through a Transaction sub-Engine, keeping getMore/killCursors inside the
-transaction.
+`Next` and `Close` route ctx through `Cursor.bind`, which applies
+`Engine.sessionContext`, keeping `getMore` and `killCursors` inside the
+transaction when the cursor was opened through a `Transaction` sub-Engine.
+
+A `Cursor` value is only valid when produced by `Query.Cursor` or `Query.Each`.
+A zero-value `Cursor{}` has a nil inner `*mongo.Cursor` and every method
+dereferences it, so it panics; the type is not usable standalone.
 
 ### InsertResult
 
@@ -251,9 +316,12 @@ type InsertResult struct {
 }
 ```
 
-On partial InsertMany failure (e.g. a unique-index violation mid-batch),
-`InsertedIDs`/`InsertedCount` reflect the documents that were inserted and the
-error is returned alongside.
+`InsertedIDs` holds the driver-reported `_id` values (server-generated
+`primitive.ObjectID` values when the documents carried none). `InsertedCount`
+is `len(InsertedIDs)`, computed locally rather than reported by the server. On
+a partial `InsertMany` failure, both fields describe the documents that were
+inserted and are returned alongside a non-nil error, so inspect the result even
+on error.
 
 ### UpsertResult
 
@@ -266,17 +334,30 @@ type UpsertResult struct {
 }
 ```
 
+A straight copy of the driver's `*mongo.UpdateResult`. This is the only place
+the package exposes `ModifiedCount`; `Update` discards it.
+
 ### Sentinel errors
 
 ```go
 var ErrCollectionRequired = errors.New("collection is required before query execution")
-var ErrNotFound = mongo.ErrNoDocuments // alias; errors.Is matches both
+
+// ErrNotFound aliases mongo.ErrNoDocuments so callers need not import the driver.
+var ErrNotFound = mongo.ErrNoDocuments
 ```
 
-`ErrCollectionRequired` is returned by every execution method when the Query
-has a nil collection (nil Query, `engine.Collection("")`, or an uninitialized
-engine). `ErrNotFound` is returned by `First` when no document matches, so
-callers need not import the driver.
+`ErrCollectionRequired` is returned by every execution method when the receiver
+is nil or no collection is bound (`engine.Collection("")`, `engine.Model(42)`,
+a nil engine, or an engine with a nil database). `ErrNotFound` is returned by
+`First` when nothing matches; because it is a variable alias,
+`errors.Is(err, swifty_orm.ErrNotFound)` and
+`errors.Is(err, mongo.ErrNoDocuments)` are both true.
+
+No other error is a sentinel. Every remaining error is either a fresh
+`errors.New`/`fmt.Errorf` value with no `%w` verb, or a driver error returned
+verbatim. There is no error wrapping anywhere in the package, so match driver
+errors with driver-provided helpers (for example
+`mongo.IsDuplicateKeyError(err)`) rather than against package sentinels.
 
 ### CollectionName
 
@@ -284,9 +365,12 @@ callers need not import the driver.
 func CollectionName(value any) string
 ```
 
-Derives a collection name via reflection: unwrap pointers, unwrap slice/array
-element (and its pointers), require struct kind (otherwise return ""), convert
-CamelCase to snake_case, then pluralize. `User` -> `users`, `ChatHistory` ->
+Derives a collection name by reflection: unwrap pointers repeatedly, then if
+the result is a slice or array, take the element type and unwrap its pointers,
+then require `reflect.Struct` (returning `""` for anything else), then
+`pluralize(toSnake(typ.Name()))`. Examples verified by tests: `&testUser{}` ->
+`test_users`, `[]testCity{}` -> `test_cities`, `42` -> `""`. Additional
+examples from the algorithm: `User` -> `users`, `ChatHistory` ->
 `chat_histories`, `Category` -> `categories`, `Address` -> `addresses`.
 
 ### Logging
@@ -308,119 +392,402 @@ var (
 func SetLevel(level int)
 ```
 
-`SetLevel` is mutex-guarded. It first resets outputs to their defaults (info
-to stdout, error to stderr), then discards streams whose level is below the
-requested one: `InfoLevel` enables everything, `ErrorLevel` keeps errors only,
-`Disabled` suppresses all output. The `Error`/`Info` variables are method
-values bound at package init; the loggers themselves are not replaceable.
+The constants are untyped integer constants, so `SetLevel` accepts any `int`.
+Both loggers are created with `log.LstdFlags|log.Lshortfile` and ANSI-colored
+prefixes. `SetLevel` takes a package-level mutex, resets both loggers to
+`os.Stdout`, restores the error logger to `os.Stderr`, then redirects to
+`io.Discard` any logger whose level is below the requested one: `InfoLevel`
+enables both, `ErrorLevel` keeps errors only, `Disabled` silences both. Levels
+above `Disabled` behave like `Disabled`.
+
+`Error`, `Errorf`, `Info`, and `Infof` are method values bound at package
+initialization; the underlying `*log.Logger` values are unexported and cannot
+be replaced. The package itself never calls these helpers, so no ORM operation
+produces log output. They exist purely as a convenience for application code.
+
+## Filter DSL
+
+### Accepted Where forms and the BSON they produce
+
+```go
+q.Where(bson.M{"a": 1, "b": nil})   // {a: 1, b: nil}          (keys sorted, one equality each)
+q.Where(map[string]any{"a": 1})     // {a: 1}
+q.Where("age", 18)                  // {age: 18}
+q.Where("deleted_at", nil)          // {deleted_at: nil}       (2-arg nil becomes a null check)
+q.Where("age", ">=", 18)            // {age: {$gte: 18}}
+q.Where("tags", "in", []string{"x"})// {tags: {$in: ["x"]}}
+q.Where("name", "like", "Tom%")     // {name: {$regex: /^Tom.*$/}}
+q.Where("age", "between", []int{1, 9})     // {age: {$gte: 1, $lte: 9}}
+q.Where("age", "not between", []int{1, 9}) // {age: {$not: {$gte: 1, $lte: 9}}}
+q.Where("meta", "$exists", true)    // {meta: {$exists: true}}  ("$" ops pass through)
+```
+
+Rejected forms, each recording a builder error surfaced at execution:
+
+```go
+q.Where()                        // "where: expected 1 (map), 2 or 3 arguments, got 0"
+q.Where(123, "x")                // field must be a non-empty string
+q.Where("  ", "x")               // blank field after TrimSpace
+q.Where("f", 1, 2)               // operator must be a string
+q.Where("f", "bogus", 1)         // unsupported operator
+q.Where("f", "like", 42)         // like requires a string pattern
+q.Where("f", "between", 5)       // between requires a 2-element slice or array
+q.Where([]string{"a"})           // single argument must be bson.M or map[string]any
+```
+
+### Operator translation
+
+`Where(field, op, value)` lowercases and trims `op`, then resolves it through
+`opAliases`:
+
+```
+=  ==             -> "="          equality
+!=  <>            -> $ne
+>                 -> $gt
+>=                -> $gte
+<                 -> $lt
+<=                -> $lte
+in                -> $in
+not in  nin       -> $nin
+like              -> anchored $regex, case-sensitive
+ilike             -> anchored $regex with option "i"
+between           -> $gte + $lte      (value: any 2-element slice or array, or [2]any)
+not between       -> $not: {$gte, $lte}
+```
+
+An unrecognized operator that starts with `$` passes through to MongoDB
+verbatim, using the raw (untrimmed, unlowercased) string as the key. Any other
+unrecognized operator records `where: unsupported operator %q`, so a broken
+filter never reaches the server. The internal canonical ops beyond MongoDB
+operators are `"="`, `"null"`, `"notNull"`, `"between"`, `"notBetween"`,
+`"like"`, and `"ilike"`.
+
+`toBetweenPair` accepts `[2]any` directly, otherwise any slice or array of
+length exactly 2 via reflection, and normalizes it to `[2]any`.
+
+`likeToRegex` runs `regexp.QuoteMeta` over the pattern, then replaces `%` with
+`.*` and `_` with `.`, and anchors the result with `^` and `$`. Verified
+mappings: `"tom"` -> `"^tom$"`, `"%tom%"` -> `"^.*tom.*$"`, `"to_m"` ->
+`"^to.m$"`, `"a.b%"` -> `"^a\\.b.*$"`, `"100%"` -> `"^100.*$"`. Because
+`QuoteMeta` runs first and no escape syntax exists, a literal `%` or `_` in the
+data cannot be matched literally.
+
+### AND composition without silent loss
+
+`buildConditionFilter` folds a condition slice into one `bson.M`, tracking
+which fields hold an operator map that it created (as opposed to a
+user-supplied equality value that happens to be a `bson.M` sub-document, which
+it never mutates):
+
+- Equality on a free field sets `field: value`.
+- Equality on a field that already holds a builder-created operator map merges
+  in as `$eq`, unless `$eq` is already present.
+- An operator on a field that already holds a builder-created operator map
+  merges into that map, unless the same operator key is already present.
+- Anything that cannot merge (duplicate equality, operator after equality,
+  duplicate operator) is appended to a top-level `$and` array of `bson.M`
+  instead of overwriting.
+
+Verified outcomes:
+
+```go
+Where("age", ">", 18).Where("age", "<", 30)  // {age: {$gt: 18, $lt: 30}}
+Where("age", ">", 10).Where("age", 18)       // {age: {$gt: 10, $eq: 18}}
+Where("age", 18).Where("age", ">", 10)       // {age: 18, $and: [{age: {$gt: 10}}]}
+Where("a", 1).Where("a", 2)                  // {a: 1, $and: [{a: 2}]}
+```
+
+The invariant is that no condition is ever dropped or overwritten. If it were
+violated, `Where("age", 18).Where("age", ">", 10)` would silently return
+documents that satisfy only one of the two predicates.
+
+### Or-group composition
+
+`buildFilter` returns `buildConditionFilter(q.conditions)` when `orGroups` is
+empty. Otherwise it assembles branches: the main-chain filter becomes a branch
+only when `len(q.conditions) > 0`, then each non-empty or-group becomes a
+branch. A single resulting branch is returned unwrapped rather than as
+`{$or: [x]}`; two or more become `{$or: [...]}`.
+
+Consequences, all covered by tests:
+
+- An `OrWhere`-only query never degenerates to match-all: `OrWhere("name","Tom").OrWhere("name","Amy")`
+  produces `{$or: [{name: "Tom"}, {name: "Amy"}]}` with no empty base branch,
+  and `OrWhere("name","Nobody").Delete(ctx)` deletes 0 documents rather than
+  the whole collection.
+- A single `OrWhere` acts exactly like `Where`.
+- `OrWhere(bson.M{})` is a no-op; the branch is never appended.
+- A `Where` added after an `OrWhere` joins the main AND chain, not the last
+  branch: `Where(a).OrWhere(b).Where(c)` means `(a AND c) OR b`.
+
+`buildProjection` returns nil when `fields` is empty, so no projection option is
+set. Otherwise each entry maps to 1, or the name after a `-` prefix maps to 0.
+
+## Grouped aggregation
+
+`buildGroupPipeline` validates first, then emits stages. Validation order:
+
+1. `GroupBy` must have at least one key, else `"aggregate: GroupBy is required"`.
+2. `Select` must not be set, else `"aggregate: Select cannot be combined with GroupBy; ..."`.
+3. Flattened group keys must be unique, so `GroupBy("addr.city", "addr_city")`
+   and `GroupBy("city", "city")` both fail.
+4. Each alias must not collide with a group key and must not repeat.
+5. Every `Having` condition field must be a known result column.
+6. Every `OrderBy` key must be a known result column, so `GroupBy("addr.city").OrderBy("addr.city")`
+   fails and `GroupBy("addr.city").OrderBy("addr_city")` succeeds.
+
+Stage emission:
+
+- `$match` with the `Where` filter, omitted when the filter is empty.
+- `$group` with `_id: "$field"` for a single group key, or
+  `_id: {flatKey: "$field", ...}` for several. Accumulators come from
+  `aggSpecs`: an empty spec field means `{$sum: 1}`, otherwise `{op: "$field"}`.
+- `$project` with `_id: 0`, each flattened group key mapped from `$_id` (single
+  key) or `$_id.flatKey` (multiple keys), and each alias set to 1.
+- `$match` with the `Having` filter, built by the same `buildConditionFilter`,
+  omitted when empty.
+- `$sort` with the `bson.D` from `OrderBy`, only when non-empty.
+- `$skip` and `$limit`, each only when the stored value is greater than 0.
+
+A fully populated query therefore yields exactly 7 stages. Because grouping
+happens before `$sort`/`$skip`/`$limit`, ordering and pagination apply to the
+grouped rows, and `Where` filters documents while `Having` filters rows.
+
+## Streaming and cursor lifecycle
+
+`Query.Cursor` hands ownership of a server-side cursor to the caller. Skipping
+`Close` leaks that cursor on the server until the server-side idle timeout
+expires (10 minutes by default), and leaves the driver connection accounted to
+the cursor. Always `defer cursor.Close(ctx)` immediately after a successful
+`Cursor` call.
+
+`Query.Each` owns the cursor itself: it defers `Close(ctx)` and returns either
+the first error from `fn` or `cursor.Err()`. Returning a sentinel error from
+`fn` is the supported way to stop iteration early; the cursor is still closed.
+
+`Find` and `Aggregate` also open cursors internally but close them via `defer`
+before returning, so callers never see them.
+
+Neither `Cursor` nor `Query` starts a goroutine. The only goroutines involved
+belong to the mongo driver's topology and connection pool machinery, created by
+`mongo.Connect` inside `NewEngine` and released by `Engine.Close`. Skipping
+`Close` leaks those monitoring goroutines and their sockets for the lifetime of
+the process.
+
+## Struct tags and field naming
+
+swifty_orm implements exactly one naming rule of its own: `CollectionName` in
+`naming.go`, which maps a Go type name to a collection name. Everything about
+document field naming is delegated to the mongo driver's BSON codec; this
+package neither reads nor rewrites `bson` struct tags, and there is no
+registry, hook, or interface for overriding field names.
+
+`CollectionName` algorithm, exactly as implemented:
+
+1. `reflect.TypeOf(value)`, then unwrap `reflect.Pointer` in a loop.
+2. Return `""` if the type is nil (a nil `any`).
+3. If the type is a slice or array, replace it with its element type and unwrap
+   pointers again (one level of slice only; `[][]User` yields `[]User`, which is
+   not a struct, so `""`).
+4. Return `""` if the result is not `reflect.Struct`.
+5. Return `pluralize(toSnake(typ.Name()))`.
+
+`toSnake` inserts `_` before every uppercase ASCII letter past index 0, then
+lowercases the whole string. It has no acronym handling, so `HTTPServer`
+becomes `h_t_t_p_server`. Non-ASCII uppercase letters are not detected because
+the comparison is `r >= 'A' && r <= 'Z'`.
+
+`pluralize` applies the first matching rule:
+
+1. Empty string returns empty.
+2. Ends in `y` with length at least 2 and a non-vowel before the `y`: replace
+   `y` with `ies` (`city` -> `cities`, `category` -> `categories`).
+3. Ends in `s`, `x`, `sh`, or `ch`: append `es` (`bus` -> `buses`,
+   `address` -> `addresses`, `fox` -> `foxes`, `dish` -> `dishes`,
+   `match` -> `matches`).
+4. Otherwise append `s` (`user` -> `users`, `day` -> `days`, `key` -> `keys`,
+   `boy` -> `boys`).
+
+Irregular plurals are not handled, so `Person` becomes `persons` and `Datum`
+becomes `datums`. Anonymous struct types have an empty `Name()`, so
+`CollectionName(struct{}{})` returns `""` and yields an unbound Query.
+
+Field naming is driver behavior, not swifty_orm behavior, and matters because
+the builder takes field names as raw strings that must match stored keys:
+
+- Without a `bson` tag, the driver uses the lowercased Go field name with no
+  underscore insertion, so `CreatedAt` maps to `createdat`, which will not
+  match a `Where("created_at", ...)` filter. Tag every field explicitly.
+- The primary key is only `_id` when tagged `bson:"_id"`; an untagged `ID`
+  field maps to `id` and MongoDB adds a separate generated `_id`.
+- Embedded structs are flattened only with `bson:",inline"`; otherwise they
+  become a nested sub-document under the embedded type's lowercased name, and
+  filters must use dotted paths.
+- `omitempty` on an update struct drops zero-valued fields from the generated
+  `$set`, which changes what `Update` writes.
+
+Discrepancy to be aware of: `naming.go` is sometimes assumed to implement
+struct-tag mapping, acronym-aware field naming, embedded-struct flattening, and
+`_id` handling. It implements none of those. Only `CollectionName`, `toSnake`,
+`pluralize`, and `isVowel` live there, and only `CollectionName` is exported.
 
 ## Internal implementation details affecting correctness
 
-### Operator aliases (filter.go)
+### Builder mutation versus cloning
 
-`Where(field, op, value)` operators are trimmed and lowercased, then resolved
-through `opAliases`:
+Every chainable method on `*Query` mutates the receiver and returns the same
+pointer. There is no copy-on-write. The invariant is: a `*Query` value has
+exactly one owner, and any chain you build off it modifies it permanently.
 
+What breaks when that invariant is violated:
+
+```go
+base := engine.Collection("users").Where("age", ">=", 18)
+
+// WRONG: both calls mutate the same Query. The second Count sees
+// WhereNotNull("email") because the first chain appended it to base.
+withEmail, _ := base.WhereNotNull("email").Count(ctx)
+total, _ := base.Count(ctx) // still filtered by email
+
+// CORRECT: branch from an explicit clone per variant.
+withEmail, _ = base.Clone().WhereNotNull("email").Count(ctx)
+total, _ = base.Clone().Count(ctx)
 ```
-=  ==            -> equality
-!=  <>           -> $ne
->  >=  <  <=     -> $gt  $gte  $lt  $lte
-in               -> $in
-not in / nin     -> $nin
-like / ilike     -> anchored $regex (case-sensitive / -insensitive)
-between          -> $gte + $lte      (value: any 2-element slice or array)
-not between      -> $not {$gte,$lte}
-```
 
-Operators starting with `$` (e.g. `"$regex"`, `"$exists"`, `"$in"`) pass
-through to MongoDB verbatim. Any other unrecognized operator records a builder
-error; the query never reaches the server with a broken filter. `like`/`ilike`
-require a string pattern; `between` requires a 2-element slice/array; both
-record builder errors otherwise.
+`Clone` produces genuinely independent state. It copies `collection`, `engine`,
+`limit`, `skip`, and `err` by value, and reallocates `conditions`, `sort`,
+`fields`, `groupFields`, `havingConds`, and `aggSpecs` with `append(nil, ...)`.
+`orGroups` gets a fresh outer slice plus a fresh copy of every inner branch, so
+appending to a clone's branch list or to any branch cannot reach the original.
+Tests verify both directions for the condition/or/sort/field state and for the
+group/having/alias state.
 
-### Filter composition (filter.go)
+Three aliasing details `Clone` does not and cannot fix, because the values are
+held by reference:
 
-`buildFilter` translates `conditions` into a `bson.M` via
-`buildConditionFilter`, which guarantees AND semantics without silent loss:
+- `collection` and `engine` are shared pointers by design; both are safe for
+  concurrent use by the driver.
+- `Select(fields...)` stores the caller's slice, so `Select(mySlice...)`
+  followed by mutating `mySlice` changes the projection of the original and
+  every prior clone that shared it.
+- Condition values are stored as `any` without copying. `WhereIn("id", ids)`
+  keeps a reference to `ids`; mutating `ids` before execution changes the
+  filter, in the original and in every clone.
 
-- Equality sets `field: value`. If the field already holds an operator map
-  created by the builder, the equality merges in as `$eq`; if the slot is
-  occupied and cannot merge (duplicate equality, duplicate operator), the
-  condition drops into a top-level `$and` array instead of overwriting.
-- The builder distinguishes operator maps it created from user-supplied
-  equality values that happen to be `bson.M` (sub-document equality); the
-  latter are never mutated.
-- `between` merges `$gte` and `$lte`; `notBetween` sets `$not: {$gte, $lte}`;
-  `like`/`ilike` produce `primitive.Regex` values from `likeToRegex`, which
-  escapes all regex metacharacters and maps `%` to `.*` and `_` to `.`,
-  anchored with `^...$`.
+A partially built `Query` is also unsafe to stash on a struct and reuse across
+requests, both because of mutation aliasing and because it pins a collection
+handle and, potentially, a transaction session.
 
-Or-group composition: when `orGroups` is non-empty, the main-chain filter
-becomes one branch (only if it has conditions -- an empty base branch is never
-emitted, so an OrWhere-only query cannot degenerate to a match-all), each
-group becomes another branch, and a single remaining branch is returned
-unwrapped instead of `{$or: [...]}`. A `Where` added after an `OrWhere` still
-joins the main AND chain: `Where(a).OrWhere(b).Where(c)` means `(a AND c) OR b`.
+### Builder error accumulation and preflight
 
-`buildProjection` returns nil when no fields are selected; otherwise each
-field maps to 1, or 0 when prefixed with `-`.
+`setErr` records only the first error, so the earliest mistake in a chain wins
+and later valid calls do not mask it. `Where`, `OrWhere`, and `Having` record
+parse errors; `GroupBy` records blank-field errors; `addAggSpec` and
+`addFieldAggSpec` record alias and field errors. The direct-append condition
+methods (`WhereNot`, `WhereIn`, `WhereNotIn`, `WhereNull`, `WhereNotNull`,
+`WhereBetween`, `WhereNotBetween`, `WhereLike`, `WhereILike`, and every
+`OrWhere*` variant) validate nothing at all, so a blank field name silently
+produces a filter keyed on `""`.
 
-### Builder error accumulation and preflight (query.go, query_exec.go)
+`preflightBase` checks, in this exact order:
 
-Invalid builder input (wrong Where arity, non-string field, unknown operator,
-bad between/like values, empty group field, invalid alias) is stored in
-`Query.err` via `setErr` (first error wins). Every execution method calls
-`preflight`, which returns, in order: `ErrCollectionRequired` for a nil
-Query/collection, the pending builder error, and an error if GroupBy/Having/
-aggregation-alias state is pending on a non-Aggregate method (`Find`, `Count`,
-`Delete`, `Cursor`, ... all refuse pending group state instead of silently
-ignoring it). `Aggregate` uses `preflightBase`, which skips the group-state
-check.
+1. Nil receiver -> `ErrCollectionRequired`.
+2. `q.err != nil` -> that builder error.
+3. `q.collection == nil` -> `ErrCollectionRequired`.
 
-### Update normalization (query_exec.go)
+The builder error therefore outranks the missing collection, which the test
+suite asserts explicitly. `preflight` calls `preflightBase` and then rejects
+pending group state with `"GroupBy/Having/aggregation aliases are only
+supported by Aggregate"`. Every execution method except `Aggregate` uses
+`preflight`; `Aggregate` uses `preflightBase`. `Increment`, `Decrement`,
+`Exists`, and `CountDistinct` inherit preflight through the method they
+delegate to.
 
-`normalizeUpdate` wraps plain documents into `{$set: doc}` when they contain
-no `$`-prefixed keys. Handled types: `bson.M`, `map[string]any`,
-`bson.D`, structs, and (non-nil) pointers to structs. Anything else passes
-through unchanged. An empty document (`bson.M{}`) is still wrapped, producing
-`{$set: {}}`, which the server rejects.
+### Update normalization
 
-### Insert expansion (query_exec.go)
+`normalizeUpdate` wraps a plain document in `{$set: doc}` when it contains no
+`$`-prefixed key. Handled inputs: `bson.M`, `map[string]any`, `bson.D` (scanned
+key by key), and, via reflection after unwrapping non-nil pointers, any struct.
+A nil pointer and every other type pass through unchanged. Verified: plain
+`bson.M`, plain `map[string]any`, plain `bson.D`, a struct, and a pointer to a
+struct all get wrapped; `bson.M{"$inc": ...}` and `bson.D{{"$inc", 1}}` pass
+through. An empty `bson.M{}` still gets wrapped into `{$set: {}}`, which the
+server rejects.
 
-`expandInsertDocs` flattens a single slice/array argument into individual
-documents so `Insert(ctx, []*User{...})` works without manual conversion.
-`bson.D` (a document that is itself a slice) and `[]byte` are deliberately
-left untouched; multi-argument calls pass through as-is.
+### Insert expansion
 
-### Group pipeline construction (query_group.go)
+`expandInsertDocs` only acts when `len(documents) == 1`. It returns the input
+unchanged for a `bson.D`, for a non-slice/array value, and for a slice whose
+element kind is `reflect.Uint8`. Otherwise it flattens the slice or array into
+one element per document, so `Insert(ctx, []*User{...})` and
+`Insert(ctx, []User{...})` both work without manual conversion. Multi-argument
+calls always pass through.
 
-`buildGroupPipeline` emits, in order and only when applicable:
-`$match` (Where filter, omitted when empty), `$group` (single key: `_id:
-"$field"`; multiple keys: `_id: {flatKey: "$field", ...}`; accumulators from
-aggSpecs, count = `{$sum: 1}`), `$project` (drops `_id`, surfaces flattened
-group keys and aliases as top-level fields), `$match` (Having conditions built
-with the same condition-filter logic), `$sort`, `$skip`, `$limit`. OrderBy,
-Offset, and Limit therefore apply to the grouped result rows and must
-reference result column names.
+### Lock scope and concurrency safety
 
-### Transaction session propagation (engine.go, query_exec.go)
+The package contains exactly one lock: the package-level `sync.Mutex` in
+`log.go`, which guards `SetLevel` only. Nothing else in the package is
+synchronized.
 
-`Transaction` creates a sub-Engine carrying the session. Every query execution
-path calls `execCtx`, which routes through `Engine.sessionContext`: if the
-engine holds a session and the caller's ctx does not already carry one, the
-session is bound with `mongo.NewSessionContext`. Consequently, queries made
-through the `tx` sub-Engine join the transaction even when the plain outer
-`ctx` is passed instead of `sc`. Prefer `sc` anyway for correct
-deadline/cancellation semantics. `NextSequence` and Cursor getMore/Close also
-bind the session. Do not retain `tx` after the callback returns; the session
-is ended.
+- `*Engine` is safe for concurrent use by multiple goroutines. Its fields are
+  written only at construction, and `*mongo.Client` and `*mongo.Database` are
+  themselves concurrency-safe. Sharing one `Engine` process-wide is the intended
+  pattern.
+- The transaction sub-`Engine` is not safe to use from multiple goroutines,
+  because a `mongo.Session` does not support concurrent operations. Keep all
+  work inside the `Transaction` callback sequential.
+- `*Query` is not safe for concurrent use. Chainable methods perform unguarded
+  `append` on shared slices, so concurrent building is a data race. Concurrent
+  execution of the same fully built `Query` is also unsafe in principle,
+  because execution reads state that any other goroutine may still be mutating.
+  Give each goroutine its own `Clone`.
+- `*Cursor` is not safe for concurrent use; `Next`/`Decode`/`Current` form a
+  stateful sequence over a single driver cursor.
+- `SetLevel` is safe to call concurrently with itself, but the `Error`, `Errorf`,
+  `Info`, and `Infof` package variables are plain vars: reassigning them while
+  another goroutine calls them is a race.
 
-### Naming (naming.go)
+### Context and timeout propagation
 
-`toSnake` inserts an underscore before every uppercase letter past position 0,
-so acronyms split letter-by-letter (`HTTPServer` -> `h_t_t_p_server`).
-`pluralize` applies, in order: consonant+`y` -> `ies`; ends in `s`/`x`/`sh`/
-`ch` -> append `es`; otherwise append `s`. Irregular plurals are not handled.
+The package sets no timeouts of its own and never calls `context.WithTimeout`.
+Every ctx a caller passes goes straight to the driver, optionally after session
+binding, so all deadline and cancellation behavior comes from the caller.
+`NewEngine` uses its ctx for `mongo.Connect` and `Ping` only; it is not
+retained, so an expired construction context does not affect later queries.
+`Engine.Close` and `DropDatabase` take their own ctx, which matters at shutdown:
+passing an already-cancelled request context makes `Disconnect` fail.
+
+### Transaction session propagation
+
+`Transaction` builds a sub-`Engine` that shares the client, database, and name
+but additionally holds the session. Every execution path calls `Query.execCtx`,
+which delegates to `Engine.sessionContext`: when the engine holds a session and
+the incoming ctx does not already carry one (`mongo.SessionFromContext(ctx) ==
+nil`), the session is bound with `mongo.NewSessionContext`. Queries issued
+through `tx` therefore join the transaction even when the plain outer ctx is
+passed instead of `sc`, which the test suite verifies with a rollback assertion.
+Prefer `sc` regardless, for correct deadline and cancellation semantics.
+`NextSequence` and `Cursor.Next`/`Cursor.Close` bind the session the same way.
+
+`Transaction` defers `session.EndSession(ctx)`, so the sub-`Engine` and any
+`Query` or `Cursor` derived from it are invalid after the callback returns. Do
+not capture `tx` in a closure that outlives the callback.
+
+### Zero values and omitted arguments
+
+- `&Query{}`: builds and inspects filters fine, but every execution method
+  returns `ErrCollectionRequired`. This is how the unit tests exercise the
+  filter and pipeline builders without a server.
+- `&Engine{}`: `Client`, `Database`, `DatabaseName` return zero values;
+  `Collection`/`Model` return unbound queries; `NextSequence` and `Transaction`
+  return `"engine is not initialized"`; `Close` and `DropDatabase` are no-ops.
+- A nil `*Engine`: all of the above hold, since every method checks `e == nil`.
+- A nil `*Query`: `Clone` returns nil; execution methods return
+  `ErrCollectionRequired`.
+- `OrderBy(field)` with no direction: ascending.
+- `Increment(ctx, field)` / `Decrement(ctx, field)` with no amount: 1.
+- `Limit(0)` / `Offset(0)`: no limit and no skip applied.
+- `EnsureIndexes(ctx, nil)`: no-op returning `(nil, nil)` after preflight.
 
 ## Typical usage
 
@@ -462,9 +829,9 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
-    defer engine.Close(ctx)
+    // ... see the shutdown example below for a non-cancelled Close context.
 
-    // Insert: variadic docs or a single slice argument (auto-expanded).
+    // Insert: variadic documents or a single slice argument (auto-expanded).
     users := []*User{
         {ID: 1, Name: "Alice", Email: "alice@example.com", Age: 30, CreatedAt: time.Now()},
         {ID: 2, Name: "Bob", Email: "bob@example.com", Age: 25, CreatedAt: time.Now()},
@@ -473,9 +840,9 @@ func main() {
     if err != nil {
         log.Fatal(err)
     }
-    fmt.Println("inserted:", res.InsertedCount)
+    fmt.Println("inserted:", res.InsertedCount, res.InsertedIDs)
 
-    // Chainable query with predicates, ordering, pagination, projection.
+    // Chainable predicates, ordering, pagination, projection.
     var adults []User
     err = engine.Model(&User{}).
         Where("age", ">=", 18).
@@ -490,7 +857,7 @@ func main() {
         log.Fatal(err)
     }
 
-    // Object form and Or-variants.
+    // Object form plus an Or-branch: (age == 30) OR (name in [...]).
     var mixed []User
     err = engine.Collection("users").
         Where(bson.M{"age": 30}).
@@ -500,17 +867,7 @@ func main() {
         log.Fatal(err)
     }
 
-    // Single document; ErrNotFound when nothing matches.
-    var u User
-    if err := engine.Model(&User{}).Where("_id", int64(1)).First(ctx, &u); err != nil {
-        if err == swifty_orm.ErrNotFound {
-            fmt.Println("not found")
-        } else {
-            log.Fatal(err)
-        }
-    }
-
-    // Update returns matched count; plain docs auto-wrap in $set.
+    // Update returns the matched count; plain documents auto-wrap in $set.
     matched, err := engine.Collection("users").
         Where("_id", int64(1)).
         Update(ctx, bson.M{"name": "Alice Updated"})
@@ -519,27 +876,49 @@ func main() {
     }
     fmt.Println("matched:", matched)
 
-    // Upsert, Increment, Decrement.
-    ur, _ := engine.Collection("users").Where("_id", int64(3)).
+    // Upsert exposes ModifiedCount and UpsertedID, which Update discards.
+    ur, err := engine.Collection("users").Where("_id", int64(3)).
         Upsert(ctx, bson.M{"name": "Carol", "age": 40})
-    fmt.Println("upserted:", ur.UpsertedCount, ur.UpsertedID)
-    _, _ = engine.Collection("users").Where("_id", int64(1)).Increment(ctx, "age")
-    _, _ = engine.Collection("users").Where("_id", int64(1)).Decrement(ctx, "age", 2)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println(ur.MatchedCount, ur.ModifiedCount, ur.UpsertedCount, ur.UpsertedID)
 
-    // Clone to branch variants from a shared base.
+    if _, err := engine.Collection("users").Where("_id", int64(1)).Increment(ctx, "age"); err != nil {
+        log.Fatal(err)
+    }
+    if _, err := engine.Collection("users").Where("_id", int64(1)).Decrement(ctx, "age", 2); err != nil {
+        log.Fatal(err)
+    }
+
+    // Branch variants from a shared base with Clone; never reuse base directly.
     base := engine.Collection("users").Where("age", ">=", 18)
-    activeCount, _ := base.Clone().WhereNotNull("email").Count(ctx)
-    total, _ := base.Clone().Count(ctx)
-    fmt.Println(activeCount, total)
+    withEmail, err := base.Clone().WhereNotNull("email").Count(ctx)
+    if err != nil {
+        log.Fatal(err)
+    }
+    total, err := base.Clone().Count(ctx)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println(withEmail, total)
 
-    // Scalar aggregation and pluck.
-    avg, _ := engine.Collection("users").Avg(ctx, "age")
+    // Scalar aggregation, Pluck, and distinct counting.
+    avg, err := engine.Collection("users").Avg(ctx, "age")
+    if err != nil {
+        log.Fatal(err)
+    }
     var names []string
-    _ = engine.Collection("users").OrderBy("name").Pluck(ctx, "name", &names)
-    n, _ := engine.Collection("users").CountDistinct(ctx, "age")
+    if err := engine.Collection("users").OrderBy("name").Pluck(ctx, "name", &names); err != nil {
+        log.Fatal(err)
+    }
+    n, err := engine.Collection("users").CountDistinct(ctx, "age")
+    if err != nil {
+        log.Fatal(err)
+    }
     fmt.Println(avg, names, n)
 
-    // Grouped aggregation: GroupBy + accumulator aliases + Having + Aggregate.
+    // Grouped aggregation: Where filters documents, Having filters rows.
     type cityAgg struct {
         City  string  `bson:"city"`
         N     int64   `bson:"n"`
@@ -547,19 +926,19 @@ func main() {
     }
     var rows []cityAgg
     err = engine.Collection("orders").
-        Where("status", "paid").      // applied before grouping
+        Where("status", "paid").   // applied before grouping
         GroupBy("city").
         CountAs("n").
-        SumAs("amount", "total").
-        Having("n", ">=", 2).         // references result columns
-        OrderBy("total", "desc").     // references result columns
+        SumAs("amount", "total").  // field first, alias second
+        Having("n", ">=", 2).      // references result columns
+        OrderBy("total", "desc").  // references result columns
         Limit(10).
         Aggregate(ctx, &rows)
     if err != nil {
         log.Fatal(err)
     }
 
-    // Streaming, callback style: cursor closed automatically.
+    // Streaming, callback style: the cursor is closed automatically.
     err = engine.Collection("orders").
         Where("status", "paid").
         OrderBy("amount", "desc").
@@ -575,7 +954,7 @@ func main() {
         log.Fatal(err)
     }
 
-    // Streaming, manual style: remember to Close.
+    // Streaming, manual style: closing is the caller's responsibility.
     cursor, err := engine.Collection("orders").OrderBy("_id").Limit(100).Cursor(ctx)
     if err != nil {
         log.Fatal(err)
@@ -592,7 +971,7 @@ func main() {
         log.Fatal(err)
     }
 
-    // Transaction (requires replica set); queries via tx auto-join the session.
+    // Transaction (requires a replica set); tx queries auto-join the session.
     err = engine.Transaction(ctx, func(sc context.Context, tx *swifty_orm.Engine) error {
         if _, err := tx.Collection("users").Where("_id", int64(1)).
             Update(sc, bson.M{"$inc": bson.M{"age": -1}}); err != nil {
@@ -607,117 +986,295 @@ func main() {
     }
 
     // Auto-increment sequence and index management.
-    nextID, _ := engine.NextSequence(ctx, "order_id")
+    nextID, err := engine.NextSequence(ctx, "order_id")
+    if err != nil {
+        log.Fatal(err)
+    }
     fmt.Println("next id:", nextID)
-    _, err = engine.Collection("users").EnsureIndexes(ctx, []mongo.IndexModel{
+    if _, err := engine.Collection("users").EnsureIndexes(ctx, []mongo.IndexModel{
         {
             Keys:    bson.D{{Key: "email", Value: 1}},
             Options: options.Index().SetUnique(true).SetName("uniq_email"),
         },
-    })
-    if err != nil {
+    }); err != nil {
         log.Fatal(err)
     }
 }
 ```
 
-## Pitfalls / known limitations
+Error handling. Distinguish the not-found sentinel, the unbound-collection
+sentinel, and driver errors, which arrive unwrapped:
 
-1. Empty filter on Update or Delete operates on the entire collection. No
-   built-in guard exists against unconditional mass mutation; enforce at
-   least one condition at the application layer.
-2. A `Where` added after an `OrWhere` still joins the main AND chain:
-   `Where(a).OrWhere(b).Where(c)` produces `(a AND c) OR b`, which differs
-   from SQL operator precedence (`a OR (b AND c)`). Keep OrWhere calls last,
-   or restructure the query.
-3. Builder errors are deferred: invalid Where/GroupBy/alias input does not
-   fail at the call site; the first recorded error is returned by the next
-   execution method. Do not ignore execution errors, or a mistyped operator
-   will look like an empty result.
-4. `Update` returns MatchedCount, not ModifiedCount. An idempotent update
-   (setting a field to its current value) still reports 1. Use `Upsert` when
-   you need `ModifiedCount` (its result struct carries both).
-5. `Update` with an empty document (`bson.M{}`) is wrapped into `{$set: {}}`,
-   which the server rejects. Validate non-empty updates before calling.
-6. Struct updates are wrapped in `$set` with all marshaled fields, including
-   zero values (subject to `omitempty` bson tags). Use `bson.M` for partial
-   updates.
-7. Pending GroupBy/Having/alias state on any non-Aggregate execution method
-   (Find, Count, Delete, Cursor, ...) is an error by design; only `Aggregate`
-   consumes group state, and `Select` cannot be combined with GroupBy.
-8. In grouped aggregation, `Having` and `OrderBy` must reference result
-   columns: flattened group keys (`addr.city` -> `addr_city`) or accumulator
-   aliases. Referencing the raw dotted path or an unknown name is a build
-   error. Aliases must not be `_id`, start with `$`, contain `.`, repeat, or
-   collide with a group key.
-9. Sum/Avg/Min/Max always return `float64`. Sum and Avg return 0 both for "no
-   matching documents" and for a genuine zero total, which is
-   indistinguishable; Min/Max on non-numeric fields (strings, dates) fail at
-   decode. Use `Distinct` or a manual pipeline for non-numeric extremes.
-10. Query is a mutable struct; chaining mutates in place. To branch variants
-    from a shared base, use `Clone()` -- direct reuse aliases the underlying
-    slices.
-11. `Pluck` requires a non-nil pointer to a slice of the value type. Documents
-    missing the field contribute the element's zero value, indistinguishable
-    from a stored zero value.
-12. LIKE patterns support only `%` and `_` wildcards; there is no escape
-    syntax, so a literal `%` or `_` in the data cannot be matched literally
-    through WhereLike/WhereILike (all other regex metacharacters are escaped).
-13. Transactions require a MongoDB replica set or sharded cluster; standalone
-    mongod rejects them. Queries through the `tx` sub-Engine auto-join the
-    session even with a plain ctx, but do not retain `tx` after the callback
-    returns -- the session is ended.
-14. `NextSequence` uses the hard-coded `counters` collection name. It is not
-    configurable and conflicts with application collections of the same name.
-15. `CollectionName` splits acronyms letter-by-letter (`HTTPServer` ->
-    `h_t_t_p_servers`) and does not handle irregular plurals (`Person` ->
-    `persons`). There is no naming-override interface; call
-    `engine.Collection("explicit_name")` instead of `Model`.
-16. Direct-append condition methods (WhereIn, WhereNull, OrWhereIn, ...) do
-    not validate field names; an empty field string produces a filter keyed on
-    `""`. Only Where/OrWhere/Having/GroupBy/aliases validate their input.
-17. `Distinct` returns `[]any`; callers must type-assert each element.
+```go
+var u User
+err := engine.Model(&User{}).Where("_id", int64(1)).First(ctx, &u)
+switch {
+case err == nil:
+    // found
+case errors.Is(err, swifty_orm.ErrNotFound):
+    // no document matched; also matches mongo.ErrNoDocuments
+case errors.Is(err, swifty_orm.ErrCollectionRequired):
+    // nil engine, blank collection name, or a non-struct passed to Model
+default:
+    // builder error (bad operator, bad Where arity) or a driver error
+    log.Printf("query failed: %v", err)
+}
+
+// A builder error surfaces at execution, not at the call site.
+q := engine.Collection("users").Where("age", "=>", 18) // typo: unsupported operator
+if _, err := q.Count(ctx); err != nil {
+    log.Printf("deferred builder error: %v", err) // "where: unsupported operator \"=>\""
+}
+
+// Driver errors are returned verbatim; match them with driver helpers.
+if _, err := engine.Collection("users").Insert(ctx, &User{ID: 1}); err != nil {
+    if mongo.IsDuplicateKeyError(err) {
+        // unique index violation
+    }
+}
+
+// Partial InsertMany failures still report what was inserted.
+res, err := engine.Collection("users").Insert(ctx, batch)
+if err != nil {
+    log.Printf("inserted %d of %d before failing: %v", res.InsertedCount, len(batch), err)
+}
+```
+
+Shutdown and disconnect. Close the engine with a context that is not the
+already-cancelled request context, or `Disconnect` fails and the driver's
+background goroutines and sockets leak:
+
+```go
+engine, err := swifty_orm.NewEngine(startCtx, uri, "my-app")
+if err != nil {
+    log.Fatal(err)
+}
+defer func() {
+    shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+    defer cancel()
+    if err := engine.Close(shutdownCtx); err != nil {
+        log.Printf("mongo disconnect: %v", err)
+    }
+}()
+```
+
+## Testing patterns
+
+`swifty_orm_test.go` mixes pure unit tests against a zero-value `&Query{}` with
+integration tests against a live server, and the split matters for whether a
+given test can run without MongoDB.
+
+Unit tests, no server required: they construct `&Query{}` directly and inspect
+the unexported builders, since the tests live in package `swifty_orm`. Examples
+are `TestBuildFilterMergesMultipleOpsOnSameField`,
+`TestBuildFilterEqualityThenOperatorPreserved`,
+`TestBuildFilterOrWhereWithoutBaseCondition`, `TestWhereOperatorAliases`,
+`TestLikeToRegex`, `TestPluralize`, `TestNormalizeUpdate`,
+`TestNormalizeUpdateExtended`, `TestExpandInsertDocs`, `TestCloneIndependence`,
+`TestCloneCopiesGroupState`, `TestBuildProjectionExclusion`,
+`TestOrderByCaseInsensitive`, `TestGroupPipelineShape`,
+`TestGroupBuilderValidation`, and `TestGroupResultColumnValidation`. They assert
+on `q.err`, `q.buildFilter()`, `q.buildProjection()`, and
+`q.buildGroupPipeline()`. `TestCollectionName` and `TestNewEngineValidation`
+also run without a server.
+
+Integration tests use the `openTestEngine(t)` harness:
+
+```go
+func openTestEngine(t *testing.T) (*Engine, context.Context) {
+    // ctx with a 10s timeout, cancel registered via t.Cleanup
+    // uri from MONGO_URI, defaulting to "mongodb://localhost:27017/"
+    // database name "swifty_orm_test_<UnixNano>" for per-test isolation
+    // RunCommand({create: "__access_check"}) probe; t.Skipf on "Unauthorized"
+    // t.Cleanup drops the database and closes the engine with a fresh 10s ctx
+}
+```
+
+Gating behavior to know before running the suite:
+
+- A reachable MongoDB is required. `NewEngine` failure is a hard `t.Fatalf`, so
+  with no server the integration tests fail rather than skip.
+- If the server requires authentication, the `__access_check` probe returns an
+  error containing `"Unauthorized"` and the test skips with a message telling
+  you to set `MONGO_URI` with credentials.
+- Each test creates its own timestamp-named database and drops it in cleanup, so
+  tests do not interfere and can run against a shared server.
+- `TestTransactionAutoSessionBinding` skips when the error text contains
+  `"Transaction numbers"` or `"IllegalOperation"`, which is how a standalone
+  mongod rejects transactions. It deliberately passes the plain outer ctx rather
+  than `sc` to prove that `execCtx` binds the session, then asserts the value
+  rolled back.
+
+Run the unit tests only with `go test -run 'TestBuild|TestWhere(Object|Operator|Invalid|NotBetween)|TestLike|TestPluralize|TestNormalize|TestExpand|TestClone|TestGroup(Pipeline|Builder|Result|Flattened)|TestOrderBy|TestCollectionName|TestNewEngine|TestSingleDotted|TestAggAlias|TestOrWhereEmptyMap' ./swifty_orm`,
+or point `MONGO_URI` at a replica set and run the whole suite.
+
+## Pitfalls and known limitations
+
+1. Chaining mutates in place. Reusing a partially built `Query` for two
+   variants silently applies the first variant's conditions to the second,
+   because every `Where*`/`OrWhere*`/`OrderBy` call appends to the receiver's
+   own slices. Call `Clone()` at each branch point, and never stash a
+   partially built `Query` on a shared struct.
+2. `Clone` copies slices but not the values inside them. `Select(mySlice...)`
+   aliases the caller's slice, and condition values such as the slice passed to
+   `WhereIn` are stored by reference, so mutating those values after building
+   changes the filter of the original and of every clone. Pass values you do
+   not intend to modify.
+3. An empty filter on `Update` or `Delete` targets the whole collection. The
+   package has no guard against unconditional mass mutation, so enforce at least
+   one condition in application code before calling either.
+4. A `Where` added after an `OrWhere` joins the main AND chain, so
+   `Where(a).OrWhere(b).Where(c)` means `(a AND c) OR b`, not SQL's
+   `a OR (b AND c)`. Put `OrWhere` calls last, or restructure into an explicit
+   `Where("$or", ...)` raw operator condition.
+5. Builder errors are deferred. Invalid `Where`/`OrWhere`/`Having`/`GroupBy`/
+   alias input records an error and is returned only by the next execution
+   method, so an ignored error makes a mistyped operator look like an empty
+   result. Never discard execution errors.
+6. Only `Where`, `OrWhere`, `Having`, `GroupBy`, and the `*As` methods validate
+   input. `WhereNot`, `WhereIn`, `WhereNotIn`, `WhereNull`, `WhereNotNull`,
+   `WhereBetween`, `WhereNotBetween`, `WhereLike`, `WhereILike`, and all
+   `OrWhere*` variants append blindly, so a blank field name produces a filter
+   keyed on `""` that matches nothing and reports no error.
+7. `Update` returns `MatchedCount`, not `ModifiedCount`. An idempotent update
+   reports 1 even though nothing changed. Use `Upsert`, whose `UpsertResult`
+   carries `ModifiedCount`, when you need to know whether a write occurred.
+8. `Update` with an empty document is wrapped into `{$set: {}}`, which the
+   server rejects. Validate that the update document is non-empty first.
+9. Struct updates are wrapped in `$set` with every marshaled field, including
+   zero values unless the `bson` tags carry `omitempty`. Use `bson.M` for
+   partial updates so absent fields stay untouched.
+10. Pending `GroupBy`/`Having`/alias state makes every non-`Aggregate`
+    execution method fail by design, including `Find`, `Count`, `Delete`, and
+    `Cursor`. Only `Aggregate` consumes group state, and `Select` cannot be
+    combined with `GroupBy`.
+11. In grouped aggregation, `Having` and `OrderBy` must name result columns:
+    flattened group keys (`addr.city` becomes `addr_city`) or accumulator
+    aliases. Raw dotted paths and unknown names are pipeline build errors.
+    Aliases must not be `_id`, start with `$`, contain `.`, repeat, or collide
+    with a group key.
+12. `Sum`, `Avg`, `Min`, and `Max` always decode into `float64` and ignore
+    `OrderBy`, `Limit`, and `Offset` because their pipeline is only `$match` +
+    `$group`. `Sum` and `Avg` return 0 both for "nothing matched" and for a
+    genuine zero, which is indistinguishable; `Min`/`Max` over strings or dates
+    fail while decoding. Use `Aggregate` or a manual pipeline for non-numeric
+    extremes.
+13. `Count` and `Distinct` also ignore `OrderBy`, `Limit`, and `Offset`. In
+    particular `Limit(10).Count(ctx)` returns the full matching count, not 10.
+14. `CountDistinct` fetches every distinct value to the client and returns its
+    length, so cardinality drives memory and network use. `Distinct` itself is
+    also subject to MongoDB's 16 MB BSON limit on the command reply.
+15. `Distinct` returns `[]any`; callers must type-assert each element, and
+    numeric types arrive as whatever BSON type the documents stored.
+16. `Pluck` requires a non-nil pointer to a slice of the value type. Documents
+    missing the field contribute the element zero value, indistinguishable from
+    a stored zero. It projects `{field: 1, "_id": 0}` internally but leaves the
+    Query's own `Select` untouched.
+17. LIKE patterns support only `%` and `_`, with no escape syntax, so a literal
+    `%` or `_` in the data cannot be matched. All other regex metacharacters are
+    escaped by `regexp.QuoteMeta`, and the pattern is anchored, so `WhereLike`
+    is never a substring match unless you write `%...%`.
+18. `Where(field, op, value)` passes any unknown `$`-prefixed operator straight
+    through without validating the value shape, so a malformed `$`-operator
+    surfaces only as a server-side error.
+19. Cursors from `Query.Cursor` are the caller's to close. Skipping `Close`
+    leaks a server-side cursor until the server's idle timeout and holds driver
+    resources. Prefer `Each`, which closes for you, unless you need manual
+    control.
+20. Transactions require a replica set or sharded cluster; a standalone mongod
+    rejects them. Queries through the `tx` sub-Engine auto-join the session even
+    with a plain ctx, but the session ends when the callback returns, so a
+    captured `tx`, `Query`, or `Cursor` is invalid afterwards. The sub-Engine is
+    also not safe for concurrent use.
+21. `NextSequence` hard-codes the `counters` collection name. It is not
+    configurable and collides with an application collection of the same name.
+22. `CollectionName` splits acronyms letter by letter (`HTTPServer` becomes
+    `h_t_t_p_servers`), does not handle irregular plurals (`Person` becomes
+    `persons`), and returns `""` for non-structs and anonymous structs, which
+    yields a Query that fails with `ErrCollectionRequired`. There is no
+    override interface; call `engine.Collection("explicit_name")` instead of
+    `Model` when the derived name is wrong.
+23. Field names are raw strings matched against stored BSON keys, and this
+    package does not read `bson` tags. An untagged Go field is stored under its
+    fully lowercased name (`CreatedAt` becomes `createdat`), so untagged structs
+    and snake_case filters silently fail to match. Tag every field explicitly,
+    including `bson:"_id"` for the primary key.
+24. `NewEngine` exposes no client options: no configurable pool size, read
+    preference, write concern, timeouts, TLS settings, or monitors beyond what
+    the URI encodes. Everything must go into the connection string.
+25. `NewEngine` pings eagerly, so construction fails fast when the server is
+    unreachable. There is no lazy-connect or retry mode; add retries at the call
+    site if startup must tolerate a not-yet-ready database.
+26. The exported logging helpers are never used by the ORM itself, so enabling
+    `InfoLevel` produces no query logging. There is no hook, monitor, or
+    statement logger; use the driver's own `options.Client().SetMonitor` through
+    a hand-built client if you need observability, which means bypassing
+    `NewEngine`.
+27. `First` honors `Offset` but not `Limit`, which is easy to misread when
+    porting a `Limit(1)` idiom from another ORM. `Limit(1).First(ctx, &out)` is
+    equivalent to `First(ctx, &out)`.
 
 ## File map
 
-| File                 | Purpose                                                                                                                                                                                                                                      |
-| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `swifty_orm.go`      | Package declaration only (anchor file).                                                                                                                                                                                                      |
-| `engine.go`          | `Engine`, `NewEngine`, accessors, `Collection`, `Model`, `Close`, `DropDatabase`, `NextSequence`, `Transaction`, `sessionContext`.                                                                                                           |
-| `query.go`           | `Query` struct, builder error accumulation (`setErr`), all chainable condition/or-branch/sort/limit/offset/select methods, `Clone`.                                                                                                          |
-| `query_exec.go`      | `ErrCollectionRequired`, `ErrNotFound`, `InsertResult`, `UpsertResult`, Insert/First/Find/Update/Upsert/Increment/Decrement/Delete/Count/Exists/EnsureIndexes/DropCollection, `preflight`, `execCtx`, `normalizeUpdate`, `expandInsertDocs`. |
-| `query_aggregate.go` | `Sum`, `Avg`, `Min`, `Max`, `Distinct`, `CountDistinct`, `Pluck`, private `aggregate` helper.                                                                                                                                                |
-| `query_group.go`     | `aggSpec`, `GroupBy`, `Having`, `CountAs`/`SumAs`/`AvgAs`/`MinAs`/`MaxAs`, `Aggregate`, `buildGroupPipeline`, `groupKeyName`.                                                                                                                |
-| `query_stream.go`    | `Cursor` type and methods (`Next`, `Decode`, `Current`, `Err`, `Close`), `Query.Cursor`, `Query.Each`, session binding for getMore.                                                                                                          |
-| `filter.go`          | `condition`, `opAliases`, `parseWhere`, `parseWhereMap`, `normalizeOp`, `toBetweenPair`, `likeToRegex`, `buildFilter`, `buildConditionFilter`, `buildProjection`.                                                                            |
-| `naming.go`          | `CollectionName`, `toSnake`, `pluralize`, `isVowel`.                                                                                                                                                                                         |
-| `log.go`             | `Error`, `Errorf`, `Info`, `Infof`, `InfoLevel`, `ErrorLevel`, `Disabled`, `SetLevel`.                                                                                                                                                       |
-| `swifty_orm_test.go` | Unit tests (filter/naming/normalization/pipeline shape) and integration tests (timestamp-isolated database per test; auth failures skip; transaction test skips on standalone mongod).                                                       |
-| `README.md`          | User-facing documentation, including a Knex.js alignment table.                                                                                                                                                                              |
-| `swifty_orm_cr.md`   | Code-review notes for the refactor (all blocking findings fixed; see filter composition, Pluck, and session-binding sections above).                                                                                                         |
-| `go.mod`             | Module declaration, dependencies, replace directives for sibling swifty modules.                                                                                                                                                             |
+| File                 | Purpose                                                                                                                                                                                                                                                    |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `swifty_orm.go`      | Package clause only; the license/anchor file. No declarations.                                                                                                                                                                                             |
+| `engine.go`          | `Engine`, `NewEngine`, `Client`, `Database`, `DatabaseName`, `Collection`, `Model`, `Close`, `DropDatabase`, `NextSequence`, `Transaction`, and the unexported `sessionContext`.                                                                             |
+| `query.go`           | `Query` struct and its builder state, `setErr`, the whole `Where`/`OrWhere` family, `OrderBy`, `Limit`, `Offset`, `Select`, `Clone`.                                                                                                                        |
+| `query_exec.go`      | `ErrCollectionRequired`, `ErrNotFound`, `InsertResult`, `UpsertResult`, `Insert`, `First`, `Find`, `Update`, `Upsert`, `Increment`, `Decrement`, `Delete`, `Count`, `Exists`, `EnsureIndexes`, `DropCollection`, plus `findOptions`, `preflight`, `preflightBase`, `execCtx`, `normalizeUpdate`, `hasOperatorKey`, `expandInsertDocs`. |
+| `query_aggregate.go` | `Distinct`, `CountDistinct`, `Pluck`, `Sum`, `Avg`, `Min`, `Max`, and the unexported `aggregate` helper that runs the `$match` + `$group` scalar pipeline.                                                                                                   |
+| `query_group.go`     | `aggSpec`, `GroupBy`, `Having`, `CountAs`, `SumAs`, `AvgAs`, `MinAs`, `MaxAs`, `Aggregate`, plus `addAggSpec`, `addFieldAggSpec`, `buildGroupPipeline`, `groupKeyName`.                                                                                      |
+| `query_stream.go`    | `Cursor` type with `Next`, `Decode`, `Current`, `Err`, `Close`, `bind`; `Query.Cursor` and `Query.Each`.                                                                                                                                                    |
+| `filter.go`          | `condition`, `opAliases`, `parseWhere`, `parseWhereMap`, `normalizeOp`, `toBetweenPair`, `likeToRegex`, `Query.buildFilter`, `buildConditionFilter`, `Query.buildProjection`.                                                                                |
+| `naming.go`          | `CollectionName` and the unexported `toSnake`, `pluralize`, `isVowel`.                                                                                                                                                                                      |
+| `log.go`             | `Error`, `Errorf`, `Info`, `Infof`, `InfoLevel`, `ErrorLevel`, `Disabled`, `SetLevel`, and the unexported loggers plus the mutex guarding `SetLevel`.                                                                                                       |
+| `swifty_orm_test.go` | Unit tests over `&Query{}` (filter merging, or-composition, operator aliases, LIKE translation, projection, clone independence, update normalization, insert expansion, group pipeline shape and validation, pluralization) and integration tests behind the `openTestEngine` harness. |
+| `README.md`          | User-facing documentation, including a Knex.js alignment table.                                                                                                                                                                                             |
+| `go.mod` / `go.sum`  | Module declaration, `go 1.26.0`, the mongo-driver requirement, indirect dependencies, and `replace` directives for the sibling swifty modules.                                                                                                              |
 
 ## Dependencies
 
-- Go 1.26.0 or newer (per `go.mod`)
-- `go.mongodb.org/mongo-driver` v1.17.6 (direct)
+Direct:
 
-`go.mod` contains `replace` directives pointing the sibling modules
-(`swifty_cache`, `swifty_http`, `swifty_rpc`) at their local directories.
+- `go.mongodb.org/mongo-driver` v1.17.9. The only direct requirement, used
+  throughout: `mongo.Connect`/`Client`/`Database`/`Collection` for connection
+  and CRUD, `mongo.Session` and `mongo.NewSessionContext` for transactions,
+  `mongo.Cursor` behind the `Cursor` type, `mongo.IndexModel` in
+  `EnsureIndexes`, `mongo.ErrNoDocuments` as `ErrNotFound`, `bson.M`/`bson.D`/
+  `bson.A`/`bson.E`/`bson.Raw` for documents and pipelines,
+  `bson/primitive.Regex` for LIKE translation, and `mongo/options` for find,
+  update, index, and `FindOneAndUpdate` options.
 
-Tests require a reachable MongoDB (default `mongodb://localhost:27017/`,
-override with `MONGO_URI`); they skip instead of failing when the server
-requires authentication, and the transaction test skips on deployments
-without replica-set support.
+Standard library only otherwise: `context`, `errors`, `fmt`, `io`, `log`, `os`,
+`reflect`, `regexp`, `sort`, `strings`, `sync`.
+
+Everything else in `go.mod` is marked `// indirect` and belongs to the mongo
+driver's transitive closure, not to this package: `github.com/davecgh/go-spew`,
+`github.com/golang/snappy`, `github.com/google/go-cmp`,
+`github.com/klauspost/compress`, `github.com/montanaflynn/stats`,
+`github.com/xdg-go/pbkdf2`, `github.com/xdg-go/scram`,
+`github.com/xdg-go/stringprep`, `github.com/youmark/pkcs8`,
+`golang.org/x/crypto`, `golang.org/x/sync`, `golang.org/x/text`.
+
+`go.mod` also carries `replace` directives pointing
+`github.com/hangtiancheng/swifty.go/swifty_cache`, `.../swifty_http`, and
+`.../swifty_rpc` at their sibling directories, with the self-replace for
+`swifty_orm` commented out. None of the three is required, so they contribute
+nothing to the build graph of this module.
+
+External requirement at runtime: a MongoDB server. Transactions additionally
+require a replica set or sharded cluster.
 
 ## Cross-references to sibling skills
 
-- `swifty-cache`: Distributed cache framework. Combine swifty_orm for
-  persistence with swifty_cache for read-through caching of query results;
-  the ORM has no built-in caching layer.
-- `swifty-http`: HTTP server framework. Initialize the Engine at server
-  startup, inject it into handlers, and pass the request context into query
-  methods so HTTP timeouts propagate to MongoDB operations.
-- `swifty-rpc`: TCP RPC framework. The Engine provides the persistence layer
-  behind RPC method implementations; construct it once per process and share
-  it across services.
+- `swifty-cache`: distributed cache framework. swifty_orm has no caching layer
+  of any kind, so pair the two when read-through caching of query results is
+  needed. Cache the decoded result structs, not the `Query`, which is mutable
+  and not safe to share.
+- `swifty-http`: HTTP server framework. Construct one `Engine` at startup,
+  inject it into handlers, pass the request context into query methods so HTTP
+  cancellation and deadlines propagate to MongoDB, and call `Engine.Close` with
+  a separate shutdown context after the server stops accepting requests.
+- `swifty-rpc`: TCP RPC framework. The `Engine` is the persistence layer behind
+  RPC method implementations; build it once per process and share it, since
+  `*Engine` is concurrency-safe while `*Query` is not.
