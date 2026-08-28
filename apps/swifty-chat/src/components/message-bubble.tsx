@@ -160,7 +160,12 @@ export function MessageBubble({
   currentUserAvatar,
   currentUserName,
 }: MessageBubbleProps) {
-  if (messageList.length === 0) {
+  // Call signalling is persisted as type 3 but carries no renderable payload.
+  const conversation = messageList.filter(
+    (message) => message.type !== MessageType.AvSignal,
+  );
+
+  if (conversation.length === 0) {
     return (
       <motion.div
         initial={{ opacity: 0 }}
@@ -178,7 +183,7 @@ export function MessageBubble({
 
   return (
     <div className="flex flex-col gap-4">
-      {messageList.map((message, index) => {
+      {conversation.map((message, index) => {
         const isSelf = message.send_id === currentUserId;
         const name = isSelf ? currentUserName : message.send_name;
         const avatar = isSelf ? currentUserAvatar : message.send_avatar;
@@ -186,7 +191,7 @@ export function MessageBubble({
         const dayKey = messageDayKey(message.created_at);
         const showDay =
           index === 0 ||
-          messageDayKey(messageList[index - 1].created_at) !== dayKey;
+          messageDayKey(conversation[index - 1].created_at) !== dayKey;
 
         return (
           <div key={message.uuid || `${message.send_id}-${index}`}>

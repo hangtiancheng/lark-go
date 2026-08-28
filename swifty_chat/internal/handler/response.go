@@ -39,3 +39,10 @@ func JsonBack(ctx *swifty_http.Context, message string, ret int, data any) {
 		ctx.JSON(swifty_http.H{"code": 500, "message": message})
 	}
 }
+
+// JsonStatus writes an explicit envelope code, for auth failures that the
+// ret convention cannot express.
+func JsonStatus(ctx *swifty_http.Context, code int, message string) {
+	ctx.Status = 200
+	ctx.JSON(swifty_http.H{"code": code, "message": message})
+}

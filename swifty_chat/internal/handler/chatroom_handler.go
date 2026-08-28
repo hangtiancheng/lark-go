@@ -31,10 +31,12 @@ func GetOnlineUsers(ctx *swifty_http.Context, next func()) {
 	JsonBack(ctx, "success", 0, users)
 }
 
+// GetCallers lists the other participants of a call room. The room id for a
+// group call is just the group uuid, so membership is checked to keep this
+// from becoming a presence probe for arbitrary rooms.
 func GetCallers(ctx *swifty_http.Context, next func()) {
 	var req struct {
-		RoomId  string `json:"room_id"`
-		OwnerId string `json:"owner_id"`
+		RoomId string `json:"room_id"`
 	}
 	if err := ctx.BindJSON(&req); err != nil {
 		JsonBack(ctx, "invalid request body", -1, nil)
@@ -44,5 +46,10 @@ func GetCallers(ctx *swifty_http.Context, next func()) {
 		JsonBack(ctx, "room_id is required", -2, nil)
 		return
 	}
-	JsonBack(ctx, "success", 0, service.GetCallers(req.RoomId, req.OwnerId))
+	ownerId, _ := ctx.State["uuid"].(string)
+	if !service.CanSeeCallRoom(ctx.Request.Context(), req.RoomId, ownerId) {
+		JsonStatus(ctx, 403, "not a participant of this call room")
+		return
+	}
+	JsonBack(ctx, "success", 0, service.GetCallers(req.RoomId, ownerId))
 }

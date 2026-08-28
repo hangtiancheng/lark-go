@@ -22,6 +22,7 @@
 
 import { Outlet } from "react-router-dom";
 
+import { CallDialog } from "@/components/call-dialog";
 import { CommandPalette } from "@/components/command-palette";
 import { NavBar } from "@/components/nav-bar";
 import { Card } from "@/components/ui/card";
@@ -34,6 +35,7 @@ export function AppShell() {
         <Outlet />
       </Card>
       <CommandPalette />
+      <CallDialog />
     </div>
   );
 }

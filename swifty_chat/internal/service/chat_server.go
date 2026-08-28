@@ -67,6 +67,13 @@ type Client struct {
 	closeOnce sync.Once
 }
 
+// inbound pairs a raw frame with the authenticated uuid of the connection it
+// arrived on, so the sender identity never has to be read from the payload.
+type inbound struct {
+	senderId string
+	payload  []byte
+}
+
 // shutdown closes the connection and signals the write goroutine to exit.
 // Channels are never closed, so concurrent senders cannot panic.
 func (c *Client) shutdown() {
@@ -79,7 +86,7 @@ func (c *Client) shutdown() {
 type Server struct {
 	Clients  map[string]*Client
 	mutex    sync.Mutex
-	Transmit chan []byte
+	Transmit chan inbound
 	done     chan struct{}
 	stopOnce sync.Once
 }
@@ -89,7 +96,7 @@ var ChatServer *Server
 func init() {
 	ChatServer = &Server{
 		Clients:  make(map[string]*Client),
-		Transmit: make(chan []byte, constant.ChannelSize),
+		Transmit: make(chan inbound, constant.ChannelSize),
 		done:     make(chan struct{}),
 	}
 }
@@ -175,11 +182,33 @@ func (s *Server) unregister(client *Client) {
 	}
 }
 
-func (s *Server) handleMessage(data []byte) {
+// resolveSender reads the authoritative display fields for a user so a client
+// cannot spoof someone else's name or avatar. ok is false when the record is
+// unavailable, in which case the caller keeps what the client sent.
+func resolveSender(ctx context.Context, uuid string) (name, avatar string, ok bool) {
+	view, err := dao.UserInfoCache.Get(ctx, uuid)
+	if err != nil {
+		return "", "", false
+	}
+	var user model.UserInfo
+	if err := json.Unmarshal(view.ByteSlice(), &user); err != nil {
+		return "", "", false
+	}
+	return user.Nickname, user.Avatar, true
+}
+
+func (s *Server) handleMessage(in inbound) {
 	var req ChatMessageRequest
-	if err := json.Unmarshal(data, &req); err != nil {
+	if err := json.Unmarshal(in.payload, &req); err != nil {
 		log.Printf("handleMessage: unmarshal failed: %v", err)
 		return
+	}
+
+	// The sender is whoever owns this connection, never whoever the frame
+	// claims: send_id drives persistence, routing and call-room identity.
+	req.SendId = in.senderId
+	if name, avatar, ok := resolveSender(bgCtx(), in.senderId); ok {
+		req.SendName, req.SendAvatar = name, avatar
 	}
 
 	msg := model.Message{
@@ -321,9 +350,11 @@ func (s *Server) handleStartCall(req ChatMessageRequest, msg model.Message, room
 		}
 		alreadyActive := len(Calls.Members(roomId)) > 0
 		var candidates []string
+		isMember := false
 		s.mutex.Lock()
 		for _, member := range group.Members {
 			if member == caller {
+				isMember = true
 				continue
 			}
 			if _, online := s.Clients[member]; !online {
@@ -335,6 +366,10 @@ func (s *Server) handleStartCall(req ChatMessageRequest, msg model.Message, room
 			candidates = append(candidates, member)
 		}
 		s.mutex.Unlock()
+		if !isMember {
+			s.sendCallFailed(caller, roomId, "you are not a member of this group")
+			return
+		}
 		if len(candidates) == 0 && !alreadyActive {
 			s.sendCallFailed(caller, roomId, "no one is available for the call")
 			return
@@ -566,7 +601,7 @@ func clientRead(c *Client) {
 		payload := make([]byte, len(data))
 		copy(payload, data)
 		select {
-		case ChatServer.Transmit <- payload:
+		case ChatServer.Transmit <- inbound{senderId: c.Uuid, payload: payload}:
 		default:
 			log.Printf("transmit channel full, message from %s rejected", c.Uuid)
 			_ = c.Conn.WriteText(`{"type":-1,"send_id":"","receive_id":"","content":"message send failed, please retry"}`)

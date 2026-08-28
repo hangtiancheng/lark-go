@@ -345,11 +345,11 @@ export const file = {
 export const chatroom = {
   onlineUsers: (signal?: AbortSignal) =>
     post("/chatroom/get-online-users", wireList(z.string()), {}, signal),
-  callers: (roomId: string, ownerId: string, signal?: AbortSignal) =>
+  callers: (roomId: string, signal?: AbortSignal) =>
     post(
       "/chatroom/get-callers",
       wireList(z.string()),
-      { room_id: roomId, owner_id: ownerId },
+      { room_id: roomId },
       signal,
     ),
 };

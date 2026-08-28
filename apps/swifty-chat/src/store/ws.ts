@@ -41,7 +41,7 @@ import useAuthStore from "./auth";
 export type ConnectionStatus = "disconnected" | "connecting" | "connected";
 
 /** `type: 3` frames carry WebRTC signalling; the call UI subscribes to them. */
-export type SignalListener = (signal: Record<string, unknown>) => void;
+export type SignalListener = (frame: Message) => void;
 
 export interface WsState {
   status: ConnectionStatus;
@@ -76,17 +76,9 @@ function invalidate(queryKey: readonly unknown[]) {
   void queryClient.invalidateQueries({ queryKey });
 }
 
-function dispatchSignal(avData: string | undefined) {
-  if (!avData) return;
-  let payload: unknown;
-  try {
-    payload = JSON.parse(avData);
-  } catch {
-    return;
-  }
-  if (typeof payload !== "object" || payload === null) return;
+function dispatchSignal(frame: Message) {
   for (const listener of signalListeners) {
-    listener(payload as Record<string, unknown>);
+    listener(frame);
   }
 }
 
@@ -130,14 +122,16 @@ function handleFrame(raw: unknown) {
     showToast(frame.content || "Message send failed, please retry", "warning");
     return;
   }
+  // `call_failed` arrives as SYSTEM with type 3, so signalling has to be
+  // dispatched before the system-topic branch would swallow it.
+  if (frame.type === MessageType.AvSignal) {
+    dispatchSignal(frame);
+    return;
+  }
   if (frame.send_id === SYSTEM_SENDER) {
     for (const queryKey of staleKeysByTopic[frame.content] ?? []) {
       invalidate(queryKey);
     }
-    return;
-  }
-  if (frame.type === MessageType.AvSignal) {
-    dispatchSignal(frame.av_data);
     return;
   }
   appendToConversation(frame);
@@ -156,10 +150,19 @@ function openSocket(userId: string) {
     socket.onclose = null;
     socket.close();
   }
+
+  // The server derives the identity from this token; a browser cannot set
+  // headers on a handshake, so it travels in the query string.
+  const { token } = useAuthStore.getState();
+  if (!token) {
+    useWsStore.setState({ status: "disconnected" });
+    return;
+  }
+
   useWsStore.setState({ status: "connecting" });
 
   const next = new WebSocket(
-    `${wsUrl}/wss?client_id=${encodeURIComponent(userId)}`,
+    `${wsUrl}/wss?client_id=${encodeURIComponent(userId)}&token=${encodeURIComponent(token)}`,
   );
   next.onopen = () => {
     reconnectDelay = INITIAL_RECONNECT_DELAY;

@@ -21,8 +21,8 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { MoreVertical, Video } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { MoreVertical, Phone, Video } from "lucide-react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useStickToBottom } from "use-stick-to-bottom";
 
@@ -49,7 +49,6 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { VideoCall, type VideoCallHandle } from "@/components/video-call";
 import { contact, group, session } from "@/service/api";
 import { errorMessage } from "@/service/http";
 import {
@@ -60,7 +59,9 @@ import {
 } from "@/service/queries";
 import { isGroupId } from "@/service/schemas";
 import useAuthStore from "@/store/auth";
+import useCallStore from "@/store/call";
 import useWsStore from "@/store/ws";
+import type { CallMedia } from "@/utils/rtc";
 import { showToast } from "@/utils/toast";
 
 type OpenDialog = "user" | "group" | "settings" | "members" | "requests";
@@ -80,7 +81,6 @@ export default function Chat() {
   const userId = userInfo.uuid;
 
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
-  const callRef = useRef<VideoCallHandle>(null);
 
   const contactInfo = useQuery(contactInfoQuery(userId, id));
   const openSession = useQuery(openSessionQuery(userId, id));
@@ -131,6 +131,16 @@ export default function Chat() {
   const name = contactInfo.data?.contact_name ?? "";
   const avatar = contactInfo.data?.contact_avatar ?? "";
 
+  const startCall = (media: CallMedia) => {
+    if (!contactInfo.data) return;
+    useCallStore.getState().dial({
+      conversationId: contactInfo.data.contact_id,
+      sessionId: openSession.data ?? "",
+      title: name,
+      media,
+    });
+  };
+
   return (
     <>
       <div className="border-border w-55 shrink-0 border-r">
@@ -159,8 +169,27 @@ export default function Chat() {
                     variant="ghost"
                     size="icon"
                     className="text-muted-foreground"
+                    aria-label="Audio call"
+                    disabled={!contactInfo.data}
+                    onClick={() => startCall("audio")}
+                  />
+                }
+              >
+                <Phone className="size-4" />
+              </TooltipTrigger>
+              <TooltipContent side="bottom">Audio Call</TooltipContent>
+            </Tooltip>
+
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-muted-foreground"
                     aria-label="Video call"
-                    onClick={() => callRef.current?.show()}
+                    disabled={!contactInfo.data}
+                    onClick={() => startCall("video")}
                   />
                 }
               >
@@ -313,12 +342,6 @@ export default function Chat() {
 
         <MessageComposer disabled={!contactInfo.data} onSend={sendMessage} />
       </div>
-
-      <VideoCall
-        ref={callRef}
-        contactId={id}
-        sessionId={openSession.data ?? ""}
-      />
 
       <ContactDetailDialog
         open={dialog === "user" || dialog === "group"}

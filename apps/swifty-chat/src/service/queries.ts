@@ -206,6 +206,6 @@ export const onlineUsersQuery = () =>
 export const callersQuery = (roomId: string, userId: string) =>
   queryOptions({
     queryKey: keys.chatroom.callers(roomId, userId),
-    queryFn: ({ signal }) => chatroom.callers(roomId, userId, signal),
+    queryFn: ({ signal }) => chatroom.callers(roomId, signal),
     enabled: Boolean(roomId && userId),
   });

@@ -215,6 +215,7 @@ export function MessageComposer({ disabled, onSend }: MessageComposerProps) {
             className="flex-1"
           />
           <span className="text-muted-foreground text-[10px] tabular-nums">
+            {progress.phase === "hashing" ? "Hashing" : "Uploading"}{" "}
             {progress.completed}/{progress.total}
           </span>
         </div>

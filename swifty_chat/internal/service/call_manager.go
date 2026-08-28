@@ -1,8 +1,13 @@
 package service
 
 import (
+	"context"
 	"sort"
+	"strings"
 	"sync"
+
+	"github.com/hangtiancheng/swifty.go/swifty_chat/internal/dao"
+	"github.com/hangtiancheng/swifty.go/swifty_chat/internal/model"
 )
 
 // callManager tracks active audio/video call rooms and per-user busy state.
@@ -109,4 +114,37 @@ func GetCallers(roomId, selfId string) []string {
 		}
 	}
 	return others
+}
+
+// CanSeeCallRoom reports whether uuid may read a room's participant list: the
+// user is already in the room, the room is their own 1v1 pair room, or the
+// room is a group they belong to.
+func CanSeeCallRoom(ctx context.Context, roomId, uuid string) bool {
+	if uuid == "" || roomId == "" {
+		return false
+	}
+	if Calls.InRoom(roomId, uuid) {
+		return true
+	}
+	if strings.HasPrefix(roomId, "P:") {
+		for _, part := range strings.Split(strings.TrimPrefix(roomId, "P:"), ":") {
+			if part == uuid {
+				return true
+			}
+		}
+		return false
+	}
+	if roomId[0] != 'G' {
+		return false
+	}
+	var group model.GroupInfo
+	if err := dao.ActiveQuery(&group).Where("uuid", roomId).First(ctx, &group); err != nil {
+		return false
+	}
+	for _, member := range group.Members {
+		if member == uuid {
+			return true
+		}
+	}
+	return false
 }
