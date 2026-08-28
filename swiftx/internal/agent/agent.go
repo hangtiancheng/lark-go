@@ -127,8 +127,9 @@ type Agent struct {
 	surfacedMemPaths map[string]struct{}
 }
 
-// RecallResult 是一次记忆召回的产出：渲染好的 system-reminder 正文，以及
-// 选中的记忆文件路径。路径要等正文真正注入对话时才记为已注入。
+// RecallResult holds the output of a single memory recall pass: the rendered
+// system-reminder body and the selected memory file paths. Paths are only
+// marked as surfaced once the reminder is actually injected into the conversation.
 type RecallResult struct {
 	Reminder string
 	Paths    []string
@@ -563,8 +564,9 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 				case recall := <-a.MemoryRecallCh:
 					if recall.Reminder != "" {
 						conv.AddSystemReminder(recall.Reminder)
-						// 真正进了对话才算「已注入」。这一轮没消费掉的召回结果
-						// 不留痕，下一轮召回时这些记忆还能参选。
+						// Only mark as surfaced once actually injected. Unconsumed
+						// recall results leave no trace so those memories remain
+						// eligible in the next recall pass.
 						a.MarkMemoriesSurfaced(recall.Paths)
 					}
 					a.MemoryRecallCh = nil // consume only once

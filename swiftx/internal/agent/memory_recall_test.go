@@ -15,7 +15,7 @@ func recallCh(reminder string, paths ...string) <-chan RecallResult {
 	return ch
 }
 
-// 有工具调用的一轮：召回结果在工具结果之后注入，同时记为已注入。
+// Turn with tool calls: the recall result is injected after tool results and marked as surfaced.
 func TestMemoryRecallInjectedAfterTools(t *testing.T) {
 	client := &mockClient{responses: [][]llm.StreamEvent{
 		{
@@ -47,8 +47,8 @@ func TestMemoryRecallInjectedAfterTools(t *testing.T) {
 	}
 }
 
-// 没有工具调用的一轮：召回结果没被消费，对应记忆不能记为已注入，
-// 下一轮召回时它们仍然要能参选。
+// Turn without tool calls: the recall result is not consumed, so the corresponding
+// memories must not be marked as surfaced and remain eligible for the next recall.
 func TestMemoryRecallNotSurfacedWithoutTools(t *testing.T) {
 	client := &mockClient{responses: [][]llm.StreamEvent{{
 		llm.TextDelta{Text: "plain answer"},

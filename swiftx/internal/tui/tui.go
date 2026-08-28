@@ -1202,7 +1202,8 @@ func (m *Model) prefetchRelevantMemories(query string) <-chan agent.RecallResult
 			recentTools, surfaced = ag.RecallHints()
 		}
 		results, _ := memory.FindRelevantMemories(ctx, query, userMemDir, memDir, recentTools, surfaced, selector)
-		// 这里只选和渲染，选中的路径随结果一起交给 agent loop，注入时再记为已注入
+		// Select and render only; selected paths travel with the result to the
+		// agent loop and are marked as surfaced upon injection.
 		paths := make([]string, 0, len(results))
 		for _, r := range results {
 			paths = append(paths, r.Path)

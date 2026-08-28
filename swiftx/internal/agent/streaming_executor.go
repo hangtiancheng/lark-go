@@ -119,11 +119,13 @@ func (se *StreamingExecutor) ExecuteAll(ctx context.Context, agent *Agent) []too
 	return results
 }
 
-// partitionToolCalls 将工具调用按相邻性分批：
-// 连续的并发安全的调用归为一个并发批次，其余各自独占一个串行批次。
+// partitionToolCalls groups adjacent tool calls into batches: consecutive
+// concurrency-safe calls form a single concurrent batch; all others each
+// occupy their own serial batch.
 //
-// 安不安全按这一次调用的实际参数算，不是只看工具类别。ls 和 rm 都是 Bash，
-// 前者可以跟 ReadFile 一起并发，后者必须独占。
+// Safety is determined by the actual arguments of each invocation, not merely
+// by the tool category. Both ls and rm are Bash, but the former can run
+// concurrently with ReadFile while the latter must run exclusively.
 func partitionToolCalls(entries []toolCallEntry, registry *tools.Registry) []toolBatch {
 	var batches []toolBatch
 	for _, entry := range entries {

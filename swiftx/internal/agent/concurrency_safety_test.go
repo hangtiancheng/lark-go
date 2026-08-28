@@ -8,7 +8,7 @@ import (
 	"github.com/hangtiancheng/swifty.go/swiftx/internal/tools"
 )
 
-// plainT 是只用来测分批的占位工具，类别可配。
+// plainT is a stub tool used solely for batch-partition tests, with a configurable category.
 type plainT struct {
 	n   string
 	cat tools.ToolCategory
@@ -22,17 +22,19 @@ func (t *plainT) Execute(context.Context, map[string]any) tools.ToolResult {
 	return tools.ToolResult{}
 }
 
-// 并发安全按这一次调用的实际参数算，不是只看工具类别。
+// Concurrency safety is determined by the actual arguments of each invocation,
+// not merely by the tool category.
 //
-// ls 和 rm 都是 Bash，前者跟 ReadFile 一样不动外部状态、可以一起并发，
-// 后者一旦跟别人并发，执行顺序就不再是模型给出的那个顺序。
+// Both ls and rm are Bash, but the former mutates no external state and can run
+// concurrently with ReadFile, while the latter must run exclusively to preserve
+// the model-intended execution order.
 func TestBashConcurrencySafetyByCommand(t *testing.T) {
 	bash := &tools.BashTool{}
 
 	safe := []string{"ls", "ls -la", "cat a.txt", "git status", "wc -l f", "pwd"}
 	for _, cmd := range safe {
 		if !tools.IsConcurrencySafe(bash, map[string]any{"command": cmd}) {
-			t.Errorf("%q 该算并发安全", cmd)
+			t.Errorf("%q should be concurrency-safe", cmd)
 		}
 	}
 
@@ -43,12 +45,12 @@ func TestBashConcurrencySafetyByCommand(t *testing.T) {
 	}
 	for _, cmd := range unsafe {
 		if tools.IsConcurrencySafe(bash, map[string]any{"command": cmd}) {
-			t.Errorf("%q 不该算并发安全", cmd)
+			t.Errorf("%q should not be concurrency-safe", cmd)
 		}
 	}
 }
 
-// 参数缺失或类型不对时按不安全处理，宁可串行也不能猜。
+// Missing or malformed arguments are treated as unsafe; prefer serial execution over guessing.
 func TestBashConcurrencySafetyBadArgs(t *testing.T) {
 	bash := &tools.BashTool{}
 	for _, args := range []map[string]any{
@@ -57,21 +59,21 @@ func TestBashConcurrencySafetyBadArgs(t *testing.T) {
 		{"command": 123},
 	} {
 		if tools.IsConcurrencySafe(bash, args) {
-			t.Errorf("args=%v 不该算并发安全", args)
+			t.Errorf("args=%v should not be concurrency-safe", args)
 		}
 	}
 }
 
-// 没实现可选接口的工具按类别兜底，行为跟以前一致。
+// Tools that do not implement the optional interface fall back to category-based safety.
 func TestConcurrencySafetyFallsBackToCategory(t *testing.T) {
 	cases := []struct {
 		name string
 		tool tools.Tool
 		want bool
 	}{
-		{"只读", &plainT{n: "ReadFile", cat: tools.CategoryRead}, true},
-		{"写", &plainT{n: "WriteFile", cat: tools.CategoryWrite}, false},
-		{"命令", &plainT{n: "Other", cat: tools.CategoryCommand}, false},
+		{"read", &plainT{n: "ReadFile", cat: tools.CategoryRead}, true},
+		{"write", &plainT{n: "WriteFile", cat: tools.CategoryWrite}, false},
+		{"command", &plainT{n: "Other", cat: tools.CategoryCommand}, false},
 	}
 	for _, c := range cases {
 		if got := tools.IsConcurrencySafe(c.tool, nil); got != c.want {
@@ -80,7 +82,7 @@ func TestConcurrencySafetyFallsBackToCategory(t *testing.T) {
 	}
 }
 
-// 只读的 Bash 要能跟 ReadFile 归到同一个并发批，这是这次改动的目的。
+// Read-only Bash commands must be grouped into the same concurrent batch as ReadFile.
 func TestReadOnlyBashBatchesWithReadTools(t *testing.T) {
 	reg := tools.NewRegistry()
 	reg.Register(&plainT{n: "ReadFile", cat: tools.CategoryRead})
@@ -96,11 +98,11 @@ func TestReadOnlyBashBatchesWithReadTools(t *testing.T) {
 
 	batches := partitionToolCalls(entries, reg)
 	if len(batches) != 1 || !batches[0].concurrent || len(batches[0].calls) != 3 {
-		t.Fatalf("该合成一个 3 个调用的并发批，实际 %s", describe(batches))
+		t.Fatalf("expected a single concurrent batch of 3 calls, got %s", describe(batches))
 	}
 }
 
-// 会改东西的 Bash 必须把批次断开，前后各自成批。
+// A mutating Bash command must break the batch; calls before and after form separate batches.
 func TestMutatingBashBreaksTheBatch(t *testing.T) {
 	reg := tools.NewRegistry()
 	reg.Register(&plainT{n: "ReadFile", cat: tools.CategoryRead})
@@ -115,7 +117,7 @@ func TestMutatingBashBreaksTheBatch(t *testing.T) {
 	}
 
 	batches := partitionToolCalls(entries, reg)
-	want := "[并发:a] [串行:b] [并发:c]"
+	want := "[concurrent:a] [serial:b] [concurrent:c]"
 	if got := describe(batches); got != want {
 		t.Errorf("got %s want %s", got, want)
 	}
@@ -127,9 +129,9 @@ func describe(batches []toolBatch) string {
 		if i > 0 {
 			out += " "
 		}
-		kind := "串行"
+		kind := "serial"
 		if b.concurrent {
-			kind = "并发"
+			kind = "concurrent"
 		}
 		ids := ""
 		for j, c := range b.calls {

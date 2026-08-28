@@ -612,8 +612,10 @@ func isPlanFile(targetPath, planPath string) bool {
 	return false
 }
 
-// IsSafeCommand 判断一条命令是不是只读的安全命令。
+// IsSafeCommand reports whether a command is a read-only safe command.
 //
-// 实现搬到了 tools 包：并发调度也要用同一份判定（只读命令可以跟只读工具一起跑），
-// 而 tools 包不能反过来依赖 permissions。这里保留一层转发，规则层的调用点不用改。
+// The implementation lives in the tools package because the concurrency
+// scheduler needs the same predicate (read-only commands may run alongside
+// read-only tools), and tools must not depend on permissions. This is a
+// thin forwarding wrapper so existing call sites in the rules layer are unchanged.
 func IsSafeCommand(command string) bool { return tools.IsSafeCommand(command) }

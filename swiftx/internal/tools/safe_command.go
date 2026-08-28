@@ -2,7 +2,9 @@ package tools
 
 import "strings"
 
-// 只读的安全命令白名单。两处在用：权限层判断要不要放行，调度层判断能不能并发。
+// Allowlist of read-only safe commands. Used in two places: the permissions
+// layer decides whether to allow execution, and the scheduler decides whether
+// concurrent execution is safe.
 
 var safeCommandPrefixes = []string{
 	"ls", "dir", "pwd", "echo", "cat", "head", "tail", "wc",
