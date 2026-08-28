@@ -1149,16 +1149,16 @@ func (m *Model) installMemoryExtractor(ag *agent.Agent, wd, protocol string) *ex
 }
 
 // prefetchRelevantMemories runs the recall selector in a goroutine and
-// returns a channel that will receive the rendered system-reminder
-// string (or "" if nothing was selected / selector timed out). Caller
-// must read from the channel exactly once with its own timeout.
+// returns a channel that will receive the rendered system-reminder plus
+// the selected memory paths (empty if nothing was selected / selector
+// timed out). The agent loop reads it at most once, without blocking.
 //
 // Fires a fresh side-query llm.Client per call so the selector's
 // SYSTEM prompt is independent of the main conversation's system prompt.
-func (m *Model) prefetchRelevantMemories(query string) <-chan string {
-	out := make(chan string, 1)
+func (m *Model) prefetchRelevantMemories(query string) <-chan agent.RecallResult {
+	out := make(chan agent.RecallResult, 1)
 	if m.memoryMgr == nil || m.selectedProvider == nil {
-		out <- ""
+		out <- agent.RecallResult{}
 		return out
 	}
 	provider := m.selectedProvider
@@ -1202,37 +1202,14 @@ func (m *Model) prefetchRelevantMemories(query string) <-chan string {
 			recentTools, surfaced = ag.RecallHints()
 		}
 		results, _ := memory.FindRelevantMemories(ctx, query, userMemDir, memDir, recentTools, surfaced, selector)
-		if ag != nil && len(results) > 0 {
-			paths := make([]string, 0, len(results))
-			for _, r := range results {
-				paths = append(paths, r.Path)
-			}
-			ag.MarkMemoriesSurfaced(paths)
+		// 这里只选和渲染，选中的路径随结果一起交给 agent loop，注入时再记为已注入
+		paths := make([]string, 0, len(results))
+		for _, r := range results {
+			paths = append(paths, r.Path)
 		}
-		out <- renderRelevantMemoriesReminder(results)
+		out <- agent.RecallResult{Reminder: renderRelevantMemoriesReminder(results), Paths: paths}
 	}()
 	return out
-}
-
-// collectPrefetchedRecall waits up to timeout for the prefetch channel
-// to produce a rendered reminder, then injects it as a system-reminder
-// on the given conversation. If the timeout fires first, the prefetch
-// goroutine keeps running but its result is dropped — recall is
-// best-effort and must not stall the user's main request.
-func collectPrefetchedRecall(conv *conversation.Manager, prefetchCh <-chan string, timeout time.Duration) {
-	if conv == nil || prefetchCh == nil {
-		return
-	}
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case reminder := <-prefetchCh:
-		if reminder != "" {
-			conv.AddSystemReminder(reminder)
-		}
-	case <-timer.C:
-		// give up — selector still runs in background but result is discarded
-	}
 }
 
 // renderRelevantMemoriesReminder formats up to 5 recalled memory files

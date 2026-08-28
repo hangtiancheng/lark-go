@@ -113,6 +113,24 @@ type DeferrableTool interface {
 	ShouldDefer() bool
 }
 
+// ConcurrencySafeTool 让工具按这一次调用的实际参数决定能不能跟别的调用并发跑。
+//
+// 不实现它的工具按类别走：只读的可以并发，写和命令类不行。实现它的目前只有 Bash：
+// 一条命令是不是只读要看命令本身，ls 和 rm 都是 Bash，并发安全性完全不同。
+type ConcurrencySafeTool interface {
+	IsConcurrencySafe(args map[string]any) bool
+}
+
+// IsConcurrencySafe 判断某次工具调用能不能跟别的调用并发执行。
+//
+// 工具自己实现了 ConcurrencySafeTool 就听它的，否则按类别兜底。
+func IsConcurrencySafe(t Tool, args map[string]any) bool {
+	if cs, ok := t.(ConcurrencySafeTool); ok {
+		return cs.IsConcurrencySafe(args)
+	}
+	return t.Category() == CategoryRead
+}
+
 type Registry struct {
 	tools           map[string]Tool
 	discoveredTools map[string]bool

@@ -119,14 +119,16 @@ func (se *StreamingExecutor) ExecuteAll(ctx context.Context, agent *Agent) []too
 	return results
 }
 
-// partitionToolCalls groups tool calls by adjacency:
-// consecutive read-only tools (category == "read") form a single concurrent
-// batch, while write/command tools each occupy their own serial batch.
+// partitionToolCalls 将工具调用按相邻性分批：
+// 连续的并发安全的调用归为一个并发批次，其余各自独占一个串行批次。
+//
+// 安不安全按这一次调用的实际参数算，不是只看工具类别。ls 和 rm 都是 Bash，
+// 前者可以跟 ReadFile 一起并发，后者必须独占。
 func partitionToolCalls(entries []toolCallEntry, registry *tools.Registry) []toolBatch {
 	var batches []toolBatch
 	for _, entry := range entries {
 		tool := registry.Get(entry.tc.toolName)
-		safe := tool != nil && tool.Category() == tools.CategoryRead
+		safe := tool != nil && tools.IsConcurrencySafe(tool, entry.tc.arguments)
 
 		if safe && len(batches) > 0 && batches[len(batches)-1].concurrent {
 			batches[len(batches)-1].calls = append(batches[len(batches)-1].calls, entry)

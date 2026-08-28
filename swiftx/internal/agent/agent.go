@@ -87,7 +87,7 @@ type Agent struct {
 	// MemoryRecallCh is a non-blocking memory recall channel: prefetch runs in
 	// parallel with the main LLM call; the result is read and injected after
 	// tool execution completes.
-	MemoryRecallCh <-chan string
+	MemoryRecallCh <-chan RecallResult
 	ToolNameFilter func(name string) bool
 	// CoordinatorActiveFn, when non-nil, reports whether Coordinator Mode is currently in effect.
 	// Consulted every iteration alongside ToolNameFilter so the scheduling guidance appears exactly
@@ -125,6 +125,13 @@ type Agent struct {
 	// pre-filtered before recall to avoid the same memory occupying a selector
 	// slot every turn.
 	surfacedMemPaths map[string]struct{}
+}
+
+// RecallResult 是一次记忆召回的产出：渲染好的 system-reminder 正文，以及
+// 选中的记忆文件路径。路径要等正文真正注入对话时才记为已注入。
+type RecallResult struct {
+	Reminder string
+	Paths    []string
 }
 
 // maxRecentTools is the upper bound on recent tool names passed to the memory recall selector.
@@ -554,8 +561,11 @@ func (a *Agent) Run(ctx context.Context, conv *conversation.Manager) <-chan Agen
 			if a.MemoryRecallCh != nil {
 				select {
 				case recall := <-a.MemoryRecallCh:
-					if recall != "" {
-						conv.AddSystemReminder(recall)
+					if recall.Reminder != "" {
+						conv.AddSystemReminder(recall.Reminder)
+						// 真正进了对话才算「已注入」。这一轮没消费掉的召回结果
+						// 不留痕，下一轮召回时这些记忆还能参选。
+						a.MarkMemoriesSurfaced(recall.Paths)
 					}
 					a.MemoryRecallCh = nil // consume only once
 				default:

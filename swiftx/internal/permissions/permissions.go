@@ -422,36 +422,6 @@ func parseRule(raw string, effect RuleEffect) (Rule, error) {
 	return Rule{ToolName: m[1], Pattern: m[2], Effect: effect}, nil
 }
 
-// Safe read-only commands that don't need permission
-
-var safeCommandPrefixes = []string{
-	"ls", "dir", "pwd", "echo", "cat", "head", "tail", "wc",
-	"find", "which", "whereis", "whoami", "hostname", "uname",
-	"date", "cal", "uptime", "df", "du", "free", "env", "printenv",
-	"file", "stat", "readlink", "realpath", "basename", "dirname",
-	"sort", "uniq", "tr", "cut", "awk", "sed", "grep", "egrep", "fgrep",
-	"diff", "comm", "tee", "xargs", "true", "false", "test",
-	"git status", "git log", "git diff", "git show", "git branch",
-	"git tag", "git remote", "git rev-parse", "git ls-files",
-	"git blame", "git stash list", "go version", "go env",
-	"node -v", "npm -v", "npx", "python --version", "pip list",
-	"cargo --version", "rustc --version",
-}
-
-func IsSafeCommand(command string) bool {
-	cmd := strings.TrimSpace(command)
-	for _, prefix := range safeCommandPrefixes {
-		if cmd == prefix || strings.HasPrefix(cmd, prefix+" ") || strings.HasPrefix(cmd, prefix+"\t") {
-			if !strings.Contains(cmd, ">") && !strings.Contains(cmd, "|") &&
-				!strings.Contains(cmd, ";") && !strings.Contains(cmd, "&&") &&
-				!strings.Contains(cmd, "$(") && !strings.Contains(cmd, "`") {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 // Content extraction for rule matching
 
 var contentFields = map[string]string{
@@ -536,7 +506,7 @@ func (c *Checker) Check(tool tools.Tool, args map[string]any) Decision {
 	}
 
 	// Layer 1: safe read-only commands (auto-allow)
-	if cat == tools.CategoryCommand && IsSafeCommand(content) {
+	if cat == tools.CategoryCommand && tools.IsSafeCommand(content) {
 		return Decision{Effect: Allow, Reason: "Safe read-only command"}
 	}
 
@@ -641,3 +611,9 @@ func isPlanFile(targetPath, planPath string) bool {
 	}
 	return false
 }
+
+// IsSafeCommand 判断一条命令是不是只读的安全命令。
+//
+// 实现搬到了 tools 包：并发调度也要用同一份判定（只读命令可以跟只读工具一起跑），
+// 而 tools 包不能反过来依赖 permissions。这里保留一层转发，规则层的调用点不用改。
+func IsSafeCommand(command string) bool { return tools.IsSafeCommand(command) }

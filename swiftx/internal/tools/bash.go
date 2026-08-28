@@ -115,6 +115,16 @@ func (t *BashTool) Description() string { return BashDescription }
 
 func (t *BashTool) Category() ToolCategory { return CategoryCommand }
 
+// IsConcurrencySafe 只读命令可以跟别的只读工具并发，会改东西的命令必须独占。
+//
+// ls、cat、git status 这类跟 ReadFile 一样不动外部状态，没有互相干扰的余地；
+// rm、mv、npm install 一旦跟别人并发，执行顺序就不再是模型给出的那个顺序。
+// 判定复用那份安全命令白名单，重定向、管道、命令串联和命令替换都已经排除掉了。
+func (t *BashTool) IsConcurrencySafe(args map[string]any) bool {
+	cmd, ok := args["command"].(string)
+	return ok && IsSafeCommand(cmd)
+}
+
 func (t *BashTool) Schema() map[string]any {
 	return map[string]any{
 		"name":        t.Name(),
