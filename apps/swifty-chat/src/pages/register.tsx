@@ -20,8 +20,13 @@
  * SOFTWARE.
  */
 
-import { useState } from "react";
+import { useForm } from "@tanstack/react-form";
+import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
+import type * as z from "zod";
+
+import { AuthLayout } from "@/components/auth-layout";
+import { FormField } from "@/components/form-field";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -32,129 +37,157 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { api } from "@/service/api";
+import { registerSchema } from "@/lib/validation";
+import { auth } from "@/service/api";
 import useAuthStore from "@/store/auth";
-import useWsStore from "@/store/ws";
-import { isValidPhone } from "@/utils/validate";
 import { showToast } from "@/utils/toast";
-import type { UserInfo } from "@/types";
 
 export default function Register() {
-  const [nickname, setNickname] = useState("");
-  const [telephone, setTelephone] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
   const navigate = useNavigate();
 
-  const handleRegister = async () => {
-    if (!nickname || !telephone || !password || !confirmPassword) {
-      showToast("Please fill in all fields", "error");
-      return;
-    }
-    if (nickname.length < 3 || nickname.length > 10) {
-      showToast("Nickname must be 3-10 characters", "error");
-      return;
-    }
-    if (!isValidPhone(telephone)) {
-      showToast("Invalid phone number", "error");
-      return;
-    }
-    if (password !== confirmPassword) {
-      showToast("Passwords do not match", "error");
-      return;
-    }
-    const res = await api.register({ nickname, telephone, password });
-    if (res.code === 200) {
-      const data = res.data as UserInfo;
-      showToast(res.message, "success");
-      useAuthStore.getState().setUserInfo(data);
-      useWsStore.getState().connect(data.uuid);
-      navigate("/chat/sessions");
-    } else {
-      showToast(res.message || "Registration failed", "error");
-    }
-  };
+  const signUp = useMutation({
+    mutationFn: (values: z.infer<typeof registerSchema>) =>
+      auth.register({
+        nickname: values.nickname,
+        telephone: values.telephone,
+        password: values.password,
+      }),
+    onSuccess: (result) => {
+      showToast("Welcome to Swifty Chat", "success");
+      useAuthStore.getState().setAuth(result);
+      navigate("/chat/sessions", { replace: true });
+    },
+  });
+
+  const form = useForm({
+    defaultValues: {
+      nickname: "",
+      telephone: "",
+      password: "",
+      confirmPassword: "",
+    },
+    validators: { onSubmit: registerSchema },
+    onSubmit: ({ value }) => {
+      signUp.mutate(value);
+    },
+  });
 
   return (
-    <div className="bg-background relative flex min-h-screen items-center justify-center overflow-hidden p-4">
-      {/* Ambient soft-pink layers */}
-      <div
-        aria-hidden
-        className="bg-primary/10 animation-duration-[8s] pointer-events-none absolute -top-24 -right-32 h-96 w-96 animate-pulse rounded-full blur-3xl motion-reduce:animate-none"
-      />
-      <div
-        aria-hidden
-        className="bg-primary/5 animation-duration-[10s] pointer-events-none absolute -bottom-40 -left-24 h-112 w-md animate-pulse rounded-full blur-3xl [animation-delay:2s] motion-reduce:animate-none"
-      />
-      <div
-        aria-hidden
-        className="bg-primary/[0.07] pointer-events-none absolute bottom-1/4 left-1/3 h-64 w-64 rounded-full blur-3xl"
-      />
-
-      <Card className="animate-in fade-in zoom-in-95 shadow-primary/5 w-full max-w-md shadow-xl duration-300">
+    <AuthLayout>
+      <Card className="shadow-primary/5 shadow-xl">
         <CardHeader>
           <CardTitle className="text-2xl font-semibold tracking-tight">
-            Register
+            Create Account
           </CardTitle>
-          <CardDescription>Create your Swifty Chat account</CardDescription>
+          <CardDescription>Join Swifty Chat in a few seconds</CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="register-nickname">Nickname</Label>
-            <Input
-              id="register-nickname"
-              type="text"
-              placeholder="3-10 characters"
-              value={nickname}
-              onChange={(e) => setNickname(e.target.value)}
-            />
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="register-phone">Phone</Label>
-            <Input
-              id="register-phone"
-              type="text"
-              placeholder="Enter your phone number"
-              value={telephone}
-              onChange={(e) => setTelephone(e.target.value)}
-            />
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="register-password">Password</Label>
-            <Input
-              id="register-password"
-              type="password"
-              placeholder="Enter your password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="register-confirm-password">Confirm Password</Label>
-            <Input
-              id="register-confirm-password"
-              type="password"
-              placeholder="Re-enter your password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-            />
-          </div>
-        </CardContent>
-        <CardFooter className="flex-col gap-3">
-          <Button className="w-full" onClick={handleRegister}>
-            Register
-          </Button>
-          <div className="flex w-full justify-end">
-            <a
-              className="text-primary cursor-pointer text-sm hover:underline"
-              onClick={() => navigate("/login")}
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void form.handleSubmit();
+          }}
+        >
+          <CardContent className="flex flex-col gap-4">
+            <form.Field name="nickname">
+              {(field) => (
+                <FormField
+                  label="Nickname"
+                  htmlFor="register-nickname"
+                  errors={field.state.meta.errors}
+                >
+                  <Input
+                    id="register-nickname"
+                    autoComplete="nickname"
+                    placeholder="3-10 characters"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                  />
+                </FormField>
+              )}
+            </form.Field>
+
+            <form.Field name="telephone">
+              {(field) => (
+                <FormField
+                  label="Phone"
+                  htmlFor="register-phone"
+                  errors={field.state.meta.errors}
+                >
+                  <Input
+                    id="register-phone"
+                    inputMode="numeric"
+                    autoComplete="tel"
+                    placeholder="Enter your phone number"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                  />
+                </FormField>
+              )}
+            </form.Field>
+
+            <form.Field name="password">
+              {(field) => (
+                <FormField
+                  label="Password"
+                  htmlFor="register-password"
+                  errors={field.state.meta.errors}
+                >
+                  <Input
+                    id="register-password"
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder="At least 6 characters"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                  />
+                </FormField>
+              )}
+            </form.Field>
+
+            <form.Field name="confirmPassword">
+              {(field) => (
+                <FormField
+                  label="Confirm Password"
+                  htmlFor="register-confirm"
+                  errors={field.state.meta.errors}
+                >
+                  <Input
+                    id="register-confirm"
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder="Repeat your password"
+                    value={field.state.value}
+                    onBlur={field.handleBlur}
+                    onChange={(event) => field.handleChange(event.target.value)}
+                  />
+                </FormField>
+              )}
+            </form.Field>
+          </CardContent>
+
+          <CardFooter className="mt-4 flex-col gap-3">
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={signUp.isPending}
             >
-              Sign In
-            </a>
-          </div>
-        </CardFooter>
+              {signUp.isPending ? "Creating account…" : "Create Account"}
+            </Button>
+            <div className="flex w-full justify-end">
+              <button
+                type="button"
+                className="text-primary cursor-pointer text-sm hover:underline"
+                onClick={() => navigate("/login")}
+              >
+                Back to sign in
+              </button>
+            </div>
+          </CardFooter>
+        </form>
       </Card>
-    </div>
+    </AuthLayout>
   );
 }

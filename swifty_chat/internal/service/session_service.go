@@ -24,6 +24,7 @@ import (
 	"context"
 	"encoding/json"
 	"log"
+	"sort"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -32,20 +33,161 @@ import (
 	"github.com/hangtiancheng/swifty.go/swifty_chat/internal/dao"
 	"github.com/hangtiancheng/swifty.go/swifty_chat/internal/model"
 	"github.com/hangtiancheng/swifty.go/swifty_chat/internal/util"
+
+	"github.com/hangtiancheng/swifty.go/swifty_orm"
 )
 
 type UserSessionItem struct {
-	SessionId string `json:"session_id"`
-	Avatar    string `json:"avatar"`
-	UserId    string `json:"user_id"`
-	Username  string `json:"username"`
+	SessionId       string `json:"session_id"`
+	Avatar          string `json:"avatar"`
+	UserId          string `json:"user_id"`
+	Username        string `json:"username"`
+	LastMessage     string `json:"last_message"`
+	LastMessageType int8   `json:"last_message_type"`
+	LastMessageAt   string `json:"last_message_at"`
+	LastMessageAtMs int64  `json:"last_message_at_ms"`
+	UnreadCnt       int64  `json:"unread_cnt"`
 }
 
 type GroupSessionItem struct {
-	SessionId string `json:"session_id"`
-	Avatar    string `json:"avatar"`
-	GroupId   string `json:"group_id"`
-	GroupName string `json:"group_name"`
+	SessionId       string `json:"session_id"`
+	Avatar          string `json:"avatar"`
+	GroupId         string `json:"group_id"`
+	GroupName       string `json:"group_name"`
+	LastMessage     string `json:"last_message"`
+	LastMessageType int8   `json:"last_message_type"`
+	LastMessageAt   string `json:"last_message_at"`
+	LastMessageAtMs int64  `json:"last_message_at_ms"`
+	UnreadCnt       int64  `json:"unread_cnt"`
+}
+
+type sessionMeta struct {
+	lastMessage     string
+	lastMessageType int8
+	lastMessageAt   string
+	lastMessageAtMs int64
+	unreadCnt       int64
+	sortKey         int64
+}
+
+// enrichSession computes the latest visible message and the unread count for
+// one session. AV signaling frames (type 3) never surface in previews.
+func enrichSession(ctx context.Context, ownerId string, s *model.Session) sessionMeta {
+	meta := sessionMeta{sortKey: s.CreatedAt.UnixMilli()}
+
+	latest := dao.Engine.Model(&model.Message{}).
+		Where("type", "!=", constant.MessageAudioOrVideo).
+		OrderBy("created_at", "desc")
+	unread := dao.Engine.Model(&model.Message{}).
+		Where("type", "!=", constant.MessageAudioOrVideo)
+
+	if len(s.ReceiveId) > 0 && s.ReceiveId[0] == 'G' {
+		latest.Where("receive_id", s.ReceiveId)
+		unread.Where("receive_id", s.ReceiveId).Where("send_id", "!=", ownerId)
+	} else {
+		latest.Where(bson.M{"$or": bson.A{
+			bson.M{"send_id": ownerId, "receive_id": s.ReceiveId},
+			bson.M{"send_id": s.ReceiveId, "receive_id": ownerId},
+		}})
+		unread.Where("send_id", s.ReceiveId).Where("receive_id", ownerId)
+	}
+
+	var msg model.Message
+	if err := latest.First(ctx, &msg); err == nil {
+		meta.lastMessage = messagePreview(&msg)
+		meta.lastMessageType = msg.Type
+		meta.lastMessageAt = msg.CreatedAt.Format("2006-01-02 15:04:05")
+		meta.lastMessageAtMs = msg.CreatedAt.UnixMilli()
+		meta.sortKey = meta.lastMessageAtMs
+	}
+
+	if s.LastReadAt != nil {
+		unread.Where("created_at", ">", *s.LastReadAt)
+	}
+	if cnt, err := unread.Count(ctx); err == nil {
+		meta.unreadCnt = cnt
+	}
+	return meta
+}
+
+func messagePreview(m *model.Message) string {
+	switch m.Type {
+	case constant.MessageText:
+		return m.Content
+	case constant.MessageImage:
+		return "[Image]"
+	case constant.MessageVideo:
+		return "[Video]"
+	case constant.MessageFile:
+		if m.FileName != "" {
+			return "[File] " + m.FileName
+		}
+		return "[File]"
+	default:
+		return m.Content
+	}
+}
+
+func GetUserSessionList(ctx context.Context, ownerId string) (string, []UserSessionItem, int) {
+	sessions, err := loadSessions(ctx, ownerId)
+	if err != nil {
+		log.Println(err)
+		return constant.SystemError, nil, -1
+	}
+	type entry struct {
+		item UserSessionItem
+		key  int64
+	}
+	var entries []entry
+	for i := range sessions {
+		s := &sessions[i]
+		if len(s.ReceiveId) > 0 && s.ReceiveId[0] == 'U' {
+			meta := enrichSession(ctx, ownerId, s)
+			entries = append(entries, entry{key: meta.sortKey, item: UserSessionItem{
+				SessionId: s.Uuid, Avatar: s.Avatar, UserId: s.ReceiveId, Username: s.ReceiveName,
+				LastMessage: meta.lastMessage, LastMessageType: meta.lastMessageType,
+				LastMessageAt: meta.lastMessageAt, LastMessageAtMs: meta.lastMessageAtMs,
+				UnreadCnt: meta.unreadCnt,
+			}})
+		}
+	}
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].key > entries[j].key })
+	var list []UserSessionItem
+	for _, e := range entries {
+		list = append(list, e.item)
+	}
+	return "success", list, 0
+}
+
+func GetGroupSessionList(ctx context.Context, ownerId string) (string, []GroupSessionItem, int) {
+	sessions, err := loadSessions(ctx, ownerId)
+	if err != nil {
+		log.Println(err)
+		return constant.SystemError, nil, -1
+	}
+	type entry struct {
+		item GroupSessionItem
+		key  int64
+	}
+	var entries []entry
+	for i := range sessions {
+		s := &sessions[i]
+		if len(s.ReceiveId) > 0 && s.ReceiveId[0] == 'G' {
+			meta := enrichSession(ctx, ownerId, s)
+			entries = append(entries, entry{key: meta.sortKey, item: GroupSessionItem{
+				SessionId: s.Uuid, Avatar: s.Avatar, GroupId: s.ReceiveId, GroupName: s.ReceiveName,
+				LastMessage: meta.lastMessage, LastMessageType: meta.lastMessageType,
+				LastMessageAt: meta.lastMessageAt, LastMessageAtMs: meta.lastMessageAtMs,
+				UnreadCnt: meta.unreadCnt,
+			}})
+		}
+	}
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].key > entries[j].key })
+	var list []GroupSessionItem
+	for _, e := range entries {
+		list = append(list, e.item)
+	}
+	return "success", list, 0
 }
 
 // invalidateSessionCacheByReceiver drops the cached session list of every
@@ -129,40 +271,6 @@ func loadSessions(ctx context.Context, ownerId string) ([]model.Session, error) 
 	return sessions, err
 }
 
-func GetUserSessionList(ctx context.Context, ownerId string) (string, []UserSessionItem, int) {
-	sessions, err := loadSessions(ctx, ownerId)
-	if err != nil {
-		log.Println(err)
-		return constant.SystemError, nil, -1
-	}
-	var list []UserSessionItem
-	for _, s := range sessions {
-		if len(s.ReceiveId) > 0 && s.ReceiveId[0] == 'U' {
-			list = append(list, UserSessionItem{
-				SessionId: s.Uuid, Avatar: s.Avatar, UserId: s.ReceiveId, Username: s.ReceiveName,
-			})
-		}
-	}
-	return "success", list, 0
-}
-
-func GetGroupSessionList(ctx context.Context, ownerId string) (string, []GroupSessionItem, int) {
-	sessions, err := loadSessions(ctx, ownerId)
-	if err != nil {
-		log.Println(err)
-		return constant.SystemError, nil, -1
-	}
-	var list []GroupSessionItem
-	for _, s := range sessions {
-		if len(s.ReceiveId) > 0 && s.ReceiveId[0] == 'G' {
-			list = append(list, GroupSessionItem{
-				SessionId: s.Uuid, Avatar: s.Avatar, GroupId: s.ReceiveId, GroupName: s.ReceiveName,
-			})
-		}
-	}
-	return "success", list, 0
-}
-
 func DeleteSession(ctx context.Context, ownerId, sessionId string) (string, int) {
 	now := time.Now()
 	_, err := dao.Engine.Model(&model.Session{}).Where("uuid", sessionId).Update(ctx, bson.M{"deleted_at": now})
@@ -172,6 +280,111 @@ func DeleteSession(ctx context.Context, ownerId, sessionId string) (string, int)
 	}
 	_ = dao.SessionListCache.Delete(ctx, ownerId)
 	return "deleted", 0
+}
+
+// MarkSessionRead advances the owner's read cursor for the conversation so
+// its unread count drops to zero.
+func MarkSessionRead(ctx context.Context, ownerId, receiveId string) (string, int) {
+	if ownerId == "" || receiveId == "" {
+		return "owner_id and receive_id are required", -2
+	}
+	if _, err := dao.Engine.Model(&model.Session{}).
+		Where("send_id", ownerId).Where("receive_id", receiveId).WhereNull("deleted_at").
+		Update(ctx, bson.M{"last_read_at": time.Now()}); err != nil {
+		log.Println(err)
+		return constant.SystemError, -1
+	}
+	_ = dao.SessionListCache.Delete(ctx, ownerId)
+	return "marked as read", 0
+}
+
+// ensurePeerSession guarantees the owner has an active session pointing at
+// peer, restoring a soft-deleted one or creating it from the peer's profile.
+func ensurePeerSession(ctx context.Context, ownerId, peerId string) {
+	var session model.Session
+	err := dao.Engine.Model(&session).
+		Where("send_id", ownerId).Where("receive_id", peerId).
+		First(ctx, &session)
+	if err == swifty_orm.ErrNotFound {
+		createSession(ctx, ownerId, peerId)
+		return
+	}
+	if err != nil {
+		log.Printf("ensurePeerSession %s->%s failed: %v", ownerId, peerId, err)
+		return
+	}
+	if session.DeletedAt != nil {
+		if _, err := dao.Engine.Model(&model.Session{}).Where("uuid", session.Uuid).
+			Update(ctx, bson.M{"$unset": bson.M{"deleted_at": ""}}); err != nil {
+			log.Printf("ensurePeerSession restore %s failed: %v", session.Uuid, err)
+			return
+		}
+		_ = dao.SessionListCache.Delete(ctx, ownerId)
+	}
+}
+
+// touchDirectSessions makes a direct message surface in both participants'
+// session lists, mirroring the legacy chat-list behavior.
+func touchDirectSessions(ctx context.Context, sendId, receiveId string) {
+	ensurePeerSession(ctx, sendId, receiveId)
+	ensurePeerSession(ctx, receiveId, sendId)
+}
+
+// touchGroupSessions guarantees every group member has an active session for
+// the group, restoring soft-deleted ones and creating missing ones in bulk.
+func touchGroupSessions(ctx context.Context, group *model.GroupInfo) {
+	if group == nil || len(group.Members) == 0 {
+		return
+	}
+	var sessions []model.Session
+	if err := dao.Engine.Model(&sessions).
+		Where("receive_id", group.Uuid).
+		WhereIn("send_id", group.Members).
+		Find(ctx, &sessions); err != nil {
+		log.Printf("touchGroupSessions %s failed: %v", group.Uuid, err)
+		return
+	}
+	existing := make(map[string]*model.Session, len(sessions))
+	for i := range sessions {
+		existing[sessions[i].SendId] = &sessions[i]
+	}
+
+	now := time.Now()
+	var restoreUuids []string
+	var created []any
+	var affected []string
+	for _, member := range group.Members {
+		s, ok := existing[member]
+		switch {
+		case !ok:
+			created = append(created, &model.Session{
+				Uuid:        "S" + util.GetNowAndLenRandomString(11),
+				SendId:      member,
+				ReceiveId:   group.Uuid,
+				ReceiveName: group.Name,
+				Avatar:      group.Avatar,
+				CreatedAt:   now,
+			})
+			affected = append(affected, member)
+		case s.DeletedAt != nil:
+			restoreUuids = append(restoreUuids, s.Uuid)
+			affected = append(affected, member)
+		}
+	}
+	if len(restoreUuids) > 0 {
+		if _, err := dao.Engine.Model(&model.Session{}).WhereIn("uuid", restoreUuids).
+			Update(ctx, bson.M{"$unset": bson.M{"deleted_at": ""}}); err != nil {
+			log.Printf("touchGroupSessions restore failed: %v", err)
+		}
+	}
+	if len(created) > 0 {
+		if _, err := dao.Engine.Model(&model.Session{}).Insert(ctx, created...); err != nil {
+			log.Printf("touchGroupSessions insert failed: %v", err)
+		}
+	}
+	for _, member := range affected {
+		_ = dao.SessionListCache.Delete(ctx, member)
+	}
 }
 
 func CheckOpenSessionAllowed(ctx context.Context, sendId, receiveId string) (string, bool, int) {

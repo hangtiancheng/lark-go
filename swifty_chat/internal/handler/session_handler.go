@@ -88,3 +88,16 @@ func CheckOpenSessionAllowed(ctx *swifty_http.Context, next func()) {
 	msg, allowed, ret := service.CheckOpenSessionAllowed(ctx.Request.Context(), req.SendId, req.ReceiveId)
 	JsonBack(ctx, msg, ret, allowed)
 }
+
+func MarkSessionRead(ctx *swifty_http.Context, next func()) {
+	var req struct {
+		OwnerId   string `json:"owner_id"`
+		ReceiveId string `json:"receive_id"`
+	}
+	if err := ctx.BindJSON(&req); err != nil {
+		JsonBack(ctx, "invalid request body", -1, nil)
+		return
+	}
+	msg, ret := service.MarkSessionRead(ctx.Request.Context(), req.OwnerId, req.ReceiveId)
+	JsonBack(ctx, msg, ret, nil)
+}

@@ -25,10 +25,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 
+	"github.com/hangtiancheng/swifty.go/swifty_chat/internal/config"
 	"github.com/hangtiancheng/swifty.go/swifty_chat/internal/constant"
 	"github.com/hangtiancheng/swifty.go/swifty_chat/internal/dao"
 	"github.com/hangtiancheng/swifty.go/swifty_chat/internal/model"
@@ -59,23 +63,42 @@ type UserListItem struct {
 	IsDeleted bool   `json:"is_deleted"`
 }
 
-func Login(ctx context.Context, telephone string, password string) (string, *UserInfoResponse, int) {
+type AuthResponse struct {
+	Token    string            `json:"token"`
+	UserInfo *UserInfoResponse `json:"user_info"`
+}
+
+type SearchUserItem struct {
+	Uuid      string `json:"uuid"`
+	Nickname  string `json:"nickname"`
+	Telephone string `json:"telephone"`
+	Avatar    string `json:"avatar"`
+	IsFriend  bool   `json:"is_friend"`
+}
+
+func issueToken(uuid string) string {
+	conf := config.Get()
+	ttl := time.Duration(conf.Auth.TokenExpireHours) * time.Hour
+	return util.SignToken(uuid, conf.Auth.JwtSecret, ttl)
+}
+
+func Login(ctx context.Context, telephone string, password string) (string, *AuthResponse, int) {
 	var user model.UserInfo
 	err := dao.ActiveQuery(&user).Where("telephone", telephone).First(ctx, &user)
 	if err != nil {
 		log.Println(err)
 		return "user not found, please register", nil, -2
 	}
-	if user.Password != password {
+	if !util.VerifyPassword(user.Password, password) {
 		return "incorrect password", nil, -2
 	}
 	if user.Status == constant.UserStatusDisable {
 		return "account is disabled", nil, -2
 	}
-	return "login successful", toUserInfoResponse(&user), 0
+	return "login successful", &AuthResponse{Token: issueToken(user.Uuid), UserInfo: toUserInfoResponse(&user)}, 0
 }
 
-func Register(ctx context.Context, telephone, password, nickname string) (string, *UserInfoResponse, int) {
+func Register(ctx context.Context, telephone, password, nickname string) (string, *AuthResponse, int) {
 	var existing model.UserInfo
 	err := dao.ActiveQuery(&existing).Where("telephone", telephone).First(ctx, &existing)
 	if err == nil {
@@ -85,7 +108,7 @@ func Register(ctx context.Context, telephone, password, nickname string) (string
 	user := model.UserInfo{
 		Uuid:      "U" + util.GetNowAndLenRandomString(11),
 		Telephone: telephone,
-		Password:  password,
+		Password:  util.HashPassword(password),
 		Nickname:  nickname,
 		Avatar:    "",
 		CreatedAt: time.Now(),
@@ -97,7 +120,82 @@ func Register(ctx context.Context, telephone, password, nickname string) (string
 		log.Println(err)
 		return constant.SystemError, nil, -1
 	}
-	return "registration successful", toUserInfoResponse(&user), 0
+	// Every account starts with a default contact tag, like the legacy "好友".
+	tag := model.ContactTag{
+		Uuid:      "T" + util.GetNowAndLenRandomString(11),
+		UserId:    user.Uuid,
+		Name:      "Friends",
+		CreatedAt: time.Now(),
+	}
+	if _, err := dao.Engine.Model(&tag).Insert(ctx, &tag); err != nil {
+		log.Printf("Register: default tag insert failed: %v", err)
+	}
+	return "registration successful", &AuthResponse{Token: issueToken(user.Uuid), UserInfo: toUserInfoResponse(&user)}, 0
+}
+
+// UpdatePassword resets the password by telephone. Like the legacy backend's
+// forgot-password flow it is deliberately unauthenticated.
+func UpdatePassword(ctx context.Context, telephone, password string) (string, int) {
+	var user model.UserInfo
+	if err := dao.ActiveQuery(&user).Where("telephone", telephone).First(ctx, &user); err != nil {
+		return "user not found", -2
+	}
+	if _, err := dao.Engine.Model(&model.UserInfo{}).Where("uuid", user.Uuid).
+		Update(ctx, bson.M{"password": util.HashPassword(password)}); err != nil {
+		log.Println(err)
+		return constant.SystemError, -1
+	}
+	_ = dao.UserInfoCache.Delete(ctx, user.Uuid)
+	return "password updated", 0
+}
+
+// SearchUsers finds users by telephone or nickname keyword, flagging the ones
+// that are already contacts of the caller.
+func SearchUsers(ctx context.Context, ownerId, keyword string) (string, []SearchUserItem, int) {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return "keyword is required", nil, -2
+	}
+	pattern := primitive.Regex{Pattern: regexp.QuoteMeta(keyword), Options: "i"}
+	var users []model.UserInfo
+	err := dao.ActiveQuery(&users).
+		Where("uuid", "!=", ownerId).
+		Where("status", constant.UserStatusNormal).
+		Where(bson.M{"$or": bson.A{bson.M{"telephone": pattern}, bson.M{"nickname": pattern}}}).
+		Limit(20).
+		Find(ctx, &users)
+	if err != nil {
+		log.Println(err)
+		return constant.SystemError, nil, -1
+	}
+	if len(users) == 0 {
+		return "success", nil, 0
+	}
+
+	ids := make([]string, 0, len(users))
+	for _, u := range users {
+		ids = append(ids, u.Uuid)
+	}
+	friendSet := make(map[string]bool)
+	var contacts []model.UserContact
+	if err := dao.ActiveQuery(&contacts).
+		Where("user_id", ownerId).
+		WhereIn("contact_id", ids).
+		WhereIn("status", []int8{constant.ContactNormal, constant.ContactBlack, constant.ContactBeBlack}).
+		Find(ctx, &contacts); err == nil {
+		for _, c := range contacts {
+			friendSet[c.ContactId] = true
+		}
+	}
+
+	var list []SearchUserItem
+	for _, u := range users {
+		list = append(list, SearchUserItem{
+			Uuid: u.Uuid, Nickname: u.Nickname, Telephone: u.Telephone,
+			Avatar: u.Avatar, IsFriend: friendSet[u.Uuid],
+		})
+	}
+	return "success", list, 0
 }
 
 func UpdateUserInfo(ctx context.Context, uuid string, fields bson.M) (string, int) {

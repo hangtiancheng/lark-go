@@ -20,35 +20,43 @@
  * SOFTWARE.
  */
 
-import useWsStore from "../store/ws";
-import useChatStore from "../store/chat";
-import useAuthStore from "../store/auth";
+import { MessageType } from "@/service/schemas";
+import useAuthStore from "@/store/auth";
+import useWsStore from "@/store/ws";
+
+/** Who the signalling frames are addressed to. */
+export interface CallTarget {
+  sessionId: string;
+  receiveId: string;
+}
 
 export class RtcManager {
   pc: RTCPeerConnection | null = null;
   localStream: MediaStream | null = null;
   remoteStream: MediaStream | null = null;
-  onLocalStream: ((s: MediaStream) => void) | null = null;
-  onRemoteStream: ((s: MediaStream) => void) | null = null;
+  onLocalStream: ((stream: MediaStream) => void) | null = null;
+  onRemoteStream: ((stream: MediaStream) => void) | null = null;
   onCallEnded: (() => void) | null = null;
 
-  private sendSignal(type: string, data?: Record<string, unknown>) {
-    const auth = useAuthStore.getState();
-    const chat = useChatStore.getState();
-    const payload: Record<string, unknown> = {
-      messageId: "PROXY",
-      type,
-      ...(data ? { messageData: data } : {}),
-    };
+  private target: CallTarget = { sessionId: "", receiveId: "" };
+
+  setTarget(target: CallTarget) {
+    this.target = target;
+  }
+
+  /** Signalling rides on a normal chat frame with `type: 3`. */
+  private sendFrame(payload: Record<string, unknown>) {
+    const { userInfo } = useAuthStore.getState();
+    if (!this.target.receiveId) return;
     useWsStore.getState().send({
-      session_id: chat.sessionId,
-      type: 3,
+      session_id: this.target.sessionId,
+      type: MessageType.AvSignal,
       content: "",
       url: "",
-      send_id: auth.userInfo.uuid,
-      send_name: auth.userInfo.nickname,
-      send_avatar: auth.userInfo.avatar,
-      receive_id: chat.contactInfo!.contact_id,
+      send_id: userInfo.uuid,
+      send_name: userInfo.nickname,
+      send_avatar: userInfo.avatar,
+      receive_id: this.target.receiveId,
       file_size: "",
       file_name: "",
       file_type: "",
@@ -56,18 +64,28 @@ export class RtcManager {
     });
   }
 
+  private sendSignal(type: string, data?: Record<string, unknown>) {
+    this.sendFrame({
+      messageId: "PROXY",
+      type,
+      ...(data ? { messageData: data } : {}),
+    });
+  }
+
   createPeerConnection() {
     if (this.pc) return;
     this.pc = new RTCPeerConnection({});
-    this.pc.onicecandidate = (e) => {
-      if (e.candidate) this.sendSignal("candidate", { candidate: e.candidate });
+    this.pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        this.sendSignal("candidate", { candidate: event.candidate });
+      }
     };
-    this.pc.ontrack = (e) => {
+    this.pc.ontrack = (event) => {
       if (!this.remoteStream) {
         this.remoteStream = new MediaStream();
         this.onRemoteStream?.(this.remoteStream);
       }
-      this.remoteStream.addTrack(e.track);
+      this.remoteStream.addTrack(event.track);
     };
   }
 
@@ -83,7 +101,9 @@ export class RtcManager {
 
   attachLocalToPeer() {
     if (!this.localStream || !this.pc) return;
-    this.localStream.getTracks().forEach((t) => this.pc!.addTrack(t));
+    for (const track of this.localStream.getTracks()) {
+      this.pc.addTrack(track);
+    }
   }
 
   async startCall() {
@@ -106,12 +126,12 @@ export class RtcManager {
 
   async createOffer() {
     if (!this.pc) return;
-    const desc = await this.pc.createOffer({
+    const description = await this.pc.createOffer({
       offerToReceiveAudio: true,
       offerToReceiveVideo: true,
     });
-    await this.pc.setLocalDescription(desc);
-    this.sendSignal("sdp", { sdp: desc });
+    await this.pc.setLocalDescription(description);
+    this.sendSignal("sdp", { sdp: description });
   }
 
   async handleOfferSdp(sdp: RTCSessionDescriptionInit) {
@@ -128,11 +148,11 @@ export class RtcManager {
   }
 
   handleCandidate(candidate: RTCIceCandidateInit) {
-    this.pc?.addIceCandidate(new RTCIceCandidate(candidate));
+    void this.pc?.addIceCandidate(new RTCIceCandidate(candidate));
   }
 
   endCall() {
-    this.localStream?.getTracks().forEach((t) => t.stop());
+    this.localStream?.getTracks().forEach((track) => track.stop());
     this.pc?.close();
     this.localStream = null;
     this.remoteStream = null;
@@ -141,49 +161,36 @@ export class RtcManager {
   }
 
   sendEndCall() {
-    const payload = { messageId: "PEER_LEAVE" };
-    const auth = useAuthStore.getState();
-    const chat = useChatStore.getState();
-    useWsStore.getState().send({
-      session_id: chat.sessionId,
-      type: 3,
-      content: "",
-      url: "",
-      send_id: auth.userInfo.uuid,
-      send_name: auth.userInfo.nickname,
-      send_avatar: auth.userInfo.avatar,
-      receive_id: chat.contactInfo!.contact_id,
-      file_size: "",
-      file_name: "",
-      file_type: "",
-      av_data: JSON.stringify(payload),
-    });
+    this.sendFrame({ messageId: "PEER_LEAVE" });
     this.endCall();
   }
 
+  /** Returns "incoming_call" so the caller can raise its ringing UI. */
   handleSignal(avData: Record<string, unknown>) {
-    const msgId = avData.messageId as string;
+    const messageId = avData.messageId as string;
     const type = avData.type as string | undefined;
-    const msgData = avData.messageData as Record<string, unknown> | undefined;
+    const messageData = avData.messageData as
+      Record<string, unknown> | undefined;
 
-    if (msgId === "PEER_LEAVE") {
+    if (messageId === "PEER_LEAVE") {
       this.endCall();
-      return;
+      return undefined;
     }
-    if (msgId !== "PROXY") return;
+    if (messageId !== "PROXY") return undefined;
 
     if (type === "start_call") {
       return "incoming_call" as const;
-    } else if (type === "receive_call") {
-      this.createOffer();
-    } else if (type === "reject_call") {
+    }
+    if (type === "receive_call") {
+      void this.createOffer();
+    } else if (type === "reject_call" || type === "call_failed") {
       this.endCall();
-    } else if (type === "sdp" && msgData) {
-      const sdp = msgData.sdp as RTCSessionDescriptionInit;
-      if (sdp.type === "offer") this.handleOfferSdp(sdp);
-      else if (sdp.type === "answer") this.handleAnswerSdp(sdp);
-    } else if (type === "candidate" && msgData) {
-      this.handleCandidate(msgData.candidate as RTCIceCandidateInit);
+    } else if (type === "sdp" && messageData) {
+      const sdp = messageData.sdp as RTCSessionDescriptionInit;
+      if (sdp.type === "offer") void this.handleOfferSdp(sdp);
+      else if (sdp.type === "answer") void this.handleAnswerSdp(sdp);
+    } else if (type === "candidate" && messageData) {
+      this.handleCandidate(messageData.candidate as RTCIceCandidateInit);
     }
     return undefined;
   }

@@ -20,10 +20,20 @@
  * SOFTWARE.
  */
 
-export function isValidPhone(phone: string): boolean {
-  return /^1[3-9]\d{9}$/.test(phone);
-}
+import { Outlet } from "react-router-dom";
 
-export function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+import { CommandPalette } from "@/components/command-palette";
+import { NavBar } from "@/components/nav-bar";
+import { Card } from "@/components/ui/card";
+
+export function AppShell() {
+  return (
+    <div className="bg-background flex min-h-screen items-center justify-center p-4">
+      <Card className="shadow-primary/5 h-[600px] w-[1000px] flex-row gap-0 overflow-hidden p-0 shadow-xl">
+        <NavBar />
+        <Outlet />
+      </Card>
+      <CommandPalette />
+    </div>
+  );
 }

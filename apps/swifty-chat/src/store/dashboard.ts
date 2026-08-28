@@ -35,80 +35,85 @@ export interface GroupSnapshot {
   entries: EntrySnapshot[];
 }
 
+export type DashboardStatus = "disconnected" | "connecting" | "connected";
+
 export interface DashboardState {
   groups: GroupSnapshot[];
-  status: string;
-  ws: WebSocket | null;
+  status: DashboardStatus;
   connect: (url: string) => void;
   disconnect: () => void;
   deleteKey: (group: string, key: string) => void;
 }
 
-const useDashboardStore = create<DashboardState>((set, get) => ({
-  groups: [] as GroupSnapshot[],
+const RETRY_DELAY_MS = 3000;
+
+let socket: WebSocket | null = null;
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let intentionalClose = false;
+
+function clearRetryTimer() {
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+    retryTimer = null;
+  }
+}
+
+const useDashboardStore = create<DashboardState>(() => ({
+  groups: [],
   status: "disconnected",
-  ws: null as WebSocket | null,
-  _retryTimer: 0,
-  _intentionalClose: false,
 
   connect(url: string) {
-    const state = get() as DashboardState & {
-      _retryTimer: number;
-      _intentionalClose: boolean;
-    };
-    state._intentionalClose = false;
-    if (state.ws) state.ws.close();
-    if (state._retryTimer) clearTimeout(state._retryTimer);
-    set({ status: "connecting" });
+    intentionalClose = false;
+    clearRetryTimer();
+    if (socket) {
+      socket.onclose = null;
+      socket.close();
+    }
+    useDashboardStore.setState({ status: "connecting" });
 
-    const ws = new WebSocket(url);
-    ws.onopen = () => {
-      set({ status: "connected" });
-    };
-    ws.onmessage = (e: MessageEvent) => {
-      const data = JSON.parse(e.data);
-      if (data.type === "snapshot") {
-        set({ groups: data.groups ?? [] });
+    const next = new WebSocket(url);
+    next.onopen = () => useDashboardStore.setState({ status: "connected" });
+    next.onmessage = (event: MessageEvent) => {
+      try {
+        const payload = JSON.parse(String(event.data)) as {
+          type?: string;
+          groups?: GroupSnapshot[];
+        };
+        if (payload.type === "snapshot") {
+          useDashboardStore.setState({ groups: payload.groups ?? [] });
+        }
+      } catch {
+        return;
       }
     };
-    ws.onclose = () => {
-      const s = get() as DashboardState & {
-        _retryTimer: number;
-        _intentionalClose: boolean;
-      };
-      set({ status: "disconnected", ws: null });
-      if (!s._intentionalClose) {
-        s._retryTimer = window.setTimeout(() => s.connect(url), 3000);
+    next.onclose = () => {
+      socket = null;
+      useDashboardStore.setState({ status: "disconnected" });
+      if (!intentionalClose) {
+        retryTimer = setTimeout(
+          () => useDashboardStore.getState().connect(url),
+          RETRY_DELAY_MS,
+        );
       }
     };
-    ws.onerror = () => {
-      set({ status: "disconnected" });
-    };
-    set({ ws } as unknown as Partial<DashboardState>);
+    next.onerror = () => next.close();
+    socket = next;
   },
 
   disconnect() {
-    const state = get() as DashboardState & {
-      _retryTimer: number;
-      _intentionalClose: boolean;
-    };
-    state._intentionalClose = true;
-    if (state._retryTimer) clearTimeout(state._retryTimer);
-    if (state.ws) state.ws.close();
-    set({
-      ws: null,
-      status: "disconnected",
-      groups: [],
-    });
+    intentionalClose = true;
+    clearRetryTimer();
+    if (socket) {
+      socket.onclose = null;
+      socket.close();
+      socket = null;
+    }
+    useDashboardStore.setState({ status: "disconnected", groups: [] });
   },
 
   deleteKey(group: string, key: string) {
-    const state = get() as DashboardState & {
-      _retryTimer: number;
-      _intentionalClose: boolean;
-    };
-    if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-      state.ws.send(JSON.stringify({ action: "delete", group, key }));
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ action: "delete", group, key }));
     }
   },
 }));

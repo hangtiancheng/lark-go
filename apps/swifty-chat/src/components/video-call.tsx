@@ -20,212 +20,214 @@
  * SOFTWARE.
  */
 
-import {
-  forwardRef,
-  useImperativeHandle,
-  useRef,
-  useState,
-  useEffect,
-} from "react";
-import { Badge } from "@/components/ui/badge";
+import { Phone, PhoneOff, Video } from "lucide-react";
+import { useEffect, useImperativeHandle, useRef, useState } from "react";
+import type { Ref } from "react";
+
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
+import useWsStore from "@/store/ws";
 import { RtcManager } from "@/utils/rtc";
-import { showToast } from "@/utils/toast";
+
+const NO_ANSWER_TIMEOUT_MS = 30_000;
 
 export interface VideoCallHandle {
   show: () => void;
-  handleSignal: (avData: Record<string, unknown>) => void;
 }
 
-export const VideoCall = forwardRef<VideoCallHandle>(
-  function VideoCall(_, ref) {
-    const [visible, setVisible] = useState(false);
-    const [inCall, setInCall] = useState(false);
-    const [incomingCall, setIncomingCall] = useState(false);
+interface VideoCallProps {
+  contactId: string;
+  sessionId: string;
+  ref?: Ref<VideoCallHandle>;
+}
 
-    const localVideoRef = useRef<HTMLVideoElement>(null);
-    const remoteVideoRef = useRef<HTMLVideoElement>(null);
-    const [rtc] = useState(() => new RtcManager());
+export function VideoCall({ contactId, sessionId, ref }: VideoCallProps) {
+  const [visible, setVisible] = useState(false);
+  const [incoming, setIncoming] = useState(false);
+  const [active, setActive] = useState(false);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
 
-    const OUTGOING_CALL_TIMEOUT_MS = 30_000;
-    const callTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rtcRef = useRef<RtcManager | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-    const clearCallTimeout = () => {
-      if (callTimeoutRef.current) {
-        clearTimeout(callTimeoutRef.current);
-        callTimeoutRef.current = null;
-      }
-    };
+  useImperativeHandle(ref, () => ({ show: () => setVisible(true) }), []);
 
-    useEffect(() => {
-      rtc.onLocalStream = (stream) => {
-        if (localVideoRef.current) localVideoRef.current.srcObject = stream;
-      };
-      rtc.onRemoteStream = (stream) => {
-        if (remoteVideoRef.current) remoteVideoRef.current.srcObject = stream;
-      };
-      rtc.onCallEnded = () => {
-        clearCallTimeout();
-        setInCall(false);
-        setIncomingCall(false);
-        showToast("Call ended", "info");
-      };
-      return () => {
-        // Detach callbacks first so unmount cleanup does not toast or update state.
-        rtc.onLocalStream = null;
-        rtc.onRemoteStream = null;
-        rtc.onCallEnded = null;
-        clearCallTimeout();
-        rtc.endCall();
-      };
-    }, [rtc]);
+  const clearNoAnswerTimer = () => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  };
 
-    // Re-attach streams if the overlay opens while tracks already exist.
-    useEffect(() => {
-      if (!visible) return;
-      if (rtc.localStream && localVideoRef.current) {
-        localVideoRef.current.srcObject = rtc.localStream;
-      }
-      if (rtc.remoteStream && remoteVideoRef.current) {
-        remoteVideoRef.current.srcObject = rtc.remoteStream;
-      }
-    }, [visible, inCall, rtc]);
-
-    useImperativeHandle(
-      ref,
-      () => ({
-        show: () => setVisible(true),
-        handleSignal: (avData: Record<string, unknown>) => {
-          const signalType = avData.type as string | undefined;
-          if (signalType === "receive_call" || signalType === "reject_call") {
-            clearCallTimeout();
-          }
-          const result = rtc.handleSignal(avData);
-          if (result === "incoming_call") {
-            setVisible(true);
-            setIncomingCall(true);
-            showToast("Incoming call", "info");
-          }
-        },
-      }),
-      [rtc],
-    );
-
-    const startCall = async () => {
-      await rtc.startCall();
-      setInCall(true);
-      clearCallTimeout();
-      callTimeoutRef.current = setTimeout(() => {
-        callTimeoutRef.current = null;
-        rtc.sendEndCall();
-        setInCall(false);
-        showToast("No answer", "warning");
-      }, OUTGOING_CALL_TIMEOUT_MS);
-    };
-
-    const acceptCall = async () => {
-      await rtc.acceptCall();
-      setInCall(true);
-      setIncomingCall(false);
-    };
-
-    const rejectCall = () => {
-      rtc.rejectCall();
-      setIncomingCall(false);
-    };
-
-    const hangUp = () => {
-      clearCallTimeout();
-      rtc.sendEndCall();
-      setInCall(false);
-    };
-
-    const closeModal = () => {
-      if (inCall) {
-        showToast("Please hang up first", "warning");
-        return;
+  useEffect(() => {
+    const rtc = new RtcManager();
+    rtc.onLocalStream = setLocalStream;
+    rtc.onRemoteStream = setRemoteStream;
+    rtc.onCallEnded = () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
       }
       setVisible(false);
-      setIncomingCall(false);
+      setIncoming(false);
+      setActive(false);
+      setLocalStream(null);
+      setRemoteStream(null);
     };
+    rtcRef.current = rtc;
 
-    if (!visible) return null;
+    // The socket store fans every `type: 3` frame out to its subscribers.
+    const unsubscribe = useWsStore.getState().subscribeToSignals((signal) => {
+      if (rtc.handleSignal(signal) === "incoming_call") {
+        setVisible(true);
+        setIncoming(true);
+      }
+    });
 
-    return (
-      <div className="bg-foreground/40 fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm">
-        <Card className="animate-in fade-in zoom-in-95 w-[700px] max-w-[90vw] p-6 shadow-2xl duration-200">
-          <CardHeader>
-            <CardTitle className="text-center text-lg font-semibold">
-              Video Call
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            <div className="flex justify-center gap-4">
-              <div className="bg-muted relative h-56 w-72 overflow-hidden rounded-lg">
-                <video
-                  ref={localVideoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="h-full w-full object-cover"
-                />
-                <Badge variant="secondary" className="absolute bottom-2 left-2">
-                  You
-                </Badge>
-              </div>
-              <div className="bg-muted relative h-56 w-72 overflow-hidden rounded-lg">
-                <video
-                  ref={remoteVideoRef}
-                  autoPlay
-                  playsInline
-                  className="h-full w-full object-cover"
-                />
-                <Badge variant="secondary" className="absolute bottom-2 left-2">
-                  Remote
-                </Badge>
-              </div>
-            </div>
+    return () => {
+      unsubscribe();
+      // Release the camera without calling back into an unmounted component.
+      rtc.onCallEnded = null;
+      rtc.endCall();
+      rtcRef.current = null;
+    };
+  }, []);
 
-            {incomingCall && (
-              <p className="text-primary text-center text-sm">
-                Incoming call...
-              </p>
+  useEffect(() => {
+    rtcRef.current?.setTarget({ sessionId, receiveId: contactId });
+  }, [sessionId, contactId]);
+
+  useEffect(() => {
+    if (localVideoRef.current && localStream) {
+      localVideoRef.current.srcObject = localStream;
+    }
+  }, [localStream]);
+
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream]);
+
+  const startCall = async () => {
+    const rtc = rtcRef.current;
+    if (!rtc) return;
+    setActive(true);
+    await rtc.startCall();
+    clearNoAnswerTimer();
+    timeoutRef.current = setTimeout(() => {
+      rtc.sendEndCall();
+    }, NO_ANSWER_TIMEOUT_MS);
+  };
+
+  const acceptCall = async () => {
+    clearNoAnswerTimer();
+    setIncoming(false);
+    setActive(true);
+    await rtcRef.current?.acceptCall();
+  };
+
+  const rejectCall = () => {
+    const rtc = rtcRef.current;
+    if (!rtc) return;
+    rtc.rejectCall();
+    rtc.endCall();
+  };
+
+  const hangUp = () => rtcRef.current?.sendEndCall();
+
+  return (
+    <Dialog
+      open={visible}
+      onOpenChange={(next) => {
+        if (next) return;
+        if (active || incoming) hangUp();
+        else setVisible(false);
+      }}
+    >
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>
+            {incoming ? "Incoming call" : active ? "In call" : "Video call"}
+          </DialogTitle>
+        </DialogHeader>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-muted relative aspect-video overflow-hidden rounded-lg">
+            <video
+              ref={remoteVideoRef}
+              autoPlay
+              playsInline
+              className={cn(
+                "size-full object-cover",
+                !remoteStream && "hidden",
+              )}
+            />
+            {!remoteStream && (
+              <span className="text-muted-foreground absolute inset-0 flex items-center justify-center text-xs">
+                Waiting for the other side…
+              </span>
             )}
+          </div>
+          <div className="bg-muted relative aspect-video overflow-hidden rounded-lg">
+            <video
+              ref={localVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className={cn("size-full object-cover", !localStream && "hidden")}
+            />
+            {!localStream && (
+              <span className="text-muted-foreground absolute inset-0 flex items-center justify-center text-xs">
+                Your camera is off
+              </span>
+            )}
+          </div>
+        </div>
 
-            <div className="flex justify-center gap-3">
-              {!inCall && !incomingCall && (
-                <Button size="sm" onClick={startCall}>
-                  Start Call
-                </Button>
-              )}
-              {incomingCall && (
-                <>
-                  <Button size="sm" onClick={acceptCall}>
-                    Accept
-                  </Button>
-                  <Button size="sm" variant="destructive" onClick={rejectCall}>
-                    Reject
-                  </Button>
-                </>
-              )}
-              {inCall && (
-                <Button size="sm" variant="destructive" onClick={hangUp}>
-                  Hang Up
-                </Button>
-              )}
+        <div className="flex justify-center gap-2">
+          {incoming ? (
+            <>
+              <Button size="sm" onClick={() => void acceptCall()}>
+                <Phone className="size-3.5" />
+                Accept
+              </Button>
+              <Button size="sm" variant="destructive" onClick={rejectCall}>
+                <PhoneOff className="size-3.5" />
+                Reject
+              </Button>
+            </>
+          ) : active ? (
+            <Button size="sm" variant="destructive" onClick={hangUp}>
+              <PhoneOff className="size-3.5" />
+              Hang Up
+            </Button>
+          ) : (
+            <>
+              <Button size="sm" onClick={() => void startCall()}>
+                <Video className="size-3.5" />
+                Start Call
+              </Button>
               <Button
                 size="sm"
                 variant="ghost"
-                className="text-muted-foreground"
-                onClick={closeModal}
+                onClick={() => setVisible(false)}
               >
                 Close
               </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  },
-);
+            </>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

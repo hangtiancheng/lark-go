@@ -21,17 +21,11 @@
  */
 
 import { create } from "zustand";
-import type { UserInfo } from "../types";
-import { resolveAvatar } from "../utils/avatar";
+import { createJSONStorage, persist } from "zustand/middleware";
 
-export interface AuthState {
-  userInfo: UserInfo;
-  isLoggedIn: boolean;
-  setUserInfo: (info: UserInfo) => void;
-  clearUserInfo: () => void;
-}
+import type { AuthResult, UserInfo } from "@/service/schemas";
 
-const emptyUser: UserInfo = {
+export const emptyUser: UserInfo = {
   uuid: "",
   nickname: "",
   telephone: "",
@@ -45,30 +39,37 @@ const emptyUser: UserInfo = {
   created_at: "",
 };
 
-function loadUserInfo(): UserInfo {
-  try {
-    const raw = sessionStorage.getItem("userInfo");
-    return raw ? JSON.parse(raw) : { ...emptyUser };
-  } catch {
-    return { ...emptyUser };
-  }
+export interface AuthState {
+  token: string;
+  userInfo: UserInfo;
+  setAuth: (result: AuthResult) => void;
+  setUserInfo: (info: UserInfo) => void;
+  clearAuth: () => void;
 }
 
-const initialUser = loadUserInfo();
+const useAuthStore = create<AuthState>()(
+  persist(
+    (set) => ({
+      token: "",
+      userInfo: emptyUser,
+      setAuth: (result) =>
+        set({ token: result.token, userInfo: result.user_info }),
+      setUserInfo: (userInfo) => set({ userInfo }),
+      clearAuth: () => set({ token: "", userInfo: emptyUser }),
+    }),
+    {
+      name: "swifty-auth",
+      storage: createJSONStorage(() => sessionStorage),
+      partialize: (state) => ({ token: state.token, userInfo: state.userInfo }),
+    },
+  ),
+);
 
-const useAuthStore = create<AuthState>((set) => ({
-  userInfo: initialUser,
-  isLoggedIn: !!initialUser.uuid,
-  setUserInfo(info: UserInfo) {
-    info.avatar = resolveAvatar(info.avatar, info.uuid);
-    sessionStorage.setItem("userInfo", JSON.stringify(info));
-    set({ userInfo: info, isLoggedIn: !!info.uuid });
-  },
-  clearUserInfo() {
-    sessionStorage.removeItem("userInfo");
-    set({ userInfo: { ...emptyUser }, isLoggedIn: false });
-  },
-}));
+export const selectIsLoggedIn = (state: AuthState) =>
+  Boolean(state.token && state.userInfo.uuid);
+
+export const isAuthenticated = () => selectIsLoggedIn(useAuthStore.getState());
+
+export const currentUserId = () => useAuthStore.getState().userInfo.uuid;
 
 export default useAuthStore;
-export { emptyUser };

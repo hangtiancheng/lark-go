@@ -55,6 +55,36 @@ func Register(ctx *swifty_http.Context, next func()) {
 	JsonBack(ctx, msg, ret, data)
 }
 
+func UpdatePassword(ctx *swifty_http.Context, next func()) {
+	var req struct {
+		Telephone string `json:"telephone"`
+		Password  string `json:"password"`
+	}
+	if err := ctx.BindJSON(&req); err != nil {
+		JsonBack(ctx, "invalid request body", -1, nil)
+		return
+	}
+	if req.Telephone == "" || req.Password == "" {
+		JsonBack(ctx, "telephone and password are required", -2, nil)
+		return
+	}
+	msg, ret := service.UpdatePassword(ctx.Request.Context(), req.Telephone, req.Password)
+	JsonBack(ctx, msg, ret, nil)
+}
+
+func SearchUser(ctx *swifty_http.Context, next func()) {
+	var req struct {
+		OwnerId string `json:"owner_id"`
+		Keyword string `json:"keyword"`
+	}
+	if err := ctx.BindJSON(&req); err != nil {
+		JsonBack(ctx, "invalid request body", -1, nil)
+		return
+	}
+	msg, data, ret := service.SearchUsers(ctx.Request.Context(), req.OwnerId, req.Keyword)
+	JsonBack(ctx, msg, ret, data)
+}
+
 func UpdateUserInfo(ctx *swifty_http.Context, next func()) {
 	var req struct {
 		Uuid      string `json:"uuid"`

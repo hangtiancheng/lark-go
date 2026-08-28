@@ -20,17 +20,22 @@
  * SOFTWARE.
  */
 
-import { api } from "../service/api";
-import useWsStore from "../store/ws";
-import useAuthStore from "../store/auth";
+import { queryClient } from "@/lib/query-client";
+import { user } from "@/service/api";
+import useAuthStore from "@/store/auth";
+import useWsStore from "@/store/ws";
 
 /**
  * Tear down auth + websocket session. Callers should navigate
  * to "/login" after this resolves.
  */
 export async function performLogout(): Promise<void> {
-  const uid = useAuthStore.getState().userInfo.uuid;
-  await api.wsLogout({ owner_id: uid });
+  const { uuid } = useAuthStore.getState().userInfo;
+  if (uuid) {
+    // Clearing local state must happen even if the server never hears about it.
+    await user.wsLogout(uuid).catch(() => undefined);
+  }
   useWsStore.getState().disconnect();
-  useAuthStore.getState().clearUserInfo();
+  useAuthStore.getState().clearAuth();
+  queryClient.clear();
 }

@@ -20,8 +20,19 @@
  * SOFTWARE.
  */
 
-import { LogOut, MessageSquare, Settings, User, Users } from "lucide-react";
+import {
+  LogOut,
+  MessageSquare,
+  Moon,
+  Settings,
+  Sun,
+  User,
+  Users,
+} from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { motion } from "motion/react";
+import { useTheme } from "next-themes";
+import { useLocation, useNavigate } from "react-router-dom";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -31,13 +42,8 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-
-interface NavBarProps {
-  avatar: string;
-  isAdmin: boolean;
-  onNavigate: (path: string) => void;
-  onLogout: () => void;
-}
+import useAuthStore from "@/store/auth";
+import { performLogout } from "@/utils/logout";
 
 interface RailItem {
   label: string;
@@ -51,10 +57,19 @@ const NAV_ITEMS: RailItem[] = [
   { label: "Profile", path: "/chat/profile", icon: User },
 ];
 
+/** An open conversation (`/chat/:id`) still belongs to the Sessions section. */
+function activeSection(pathname: string): string {
+  if (pathname.startsWith("/chat/contacts")) return "/chat/contacts";
+  if (pathname.startsWith("/chat/profile")) return "/chat/profile";
+  if (pathname.startsWith("/chat")) return "/chat/sessions";
+  return pathname;
+}
+
 interface RailButtonProps {
   label: string;
   icon: LucideIcon;
   onClick: () => void;
+  active?: boolean;
   destructive?: boolean;
 }
 
@@ -62,6 +77,7 @@ function RailButton({
   label,
   icon: Icon,
   onClick,
+  active,
   destructive,
 }: RailButtonProps) {
   return (
@@ -72,29 +88,54 @@ function RailButton({
             variant="ghost"
             size="icon"
             aria-label={label}
+            aria-current={active ? "page" : undefined}
             onClick={onClick}
             className={cn(
-              "transition-all duration-200 hover:scale-105 active:scale-95",
+              "relative transition-colors duration-200",
               destructive
                 ? "text-destructive hover:bg-destructive/10 hover:text-destructive"
-                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                : active
+                  ? "text-primary hover:text-primary"
+                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
             )}
           />
         }
       >
-        <Icon className="size-5" />
+        {active && (
+          <motion.span
+            layoutId="nav-active-section"
+            className="bg-primary/12 absolute inset-0 rounded-md"
+            transition={{ type: "spring", stiffness: 380, damping: 30 }}
+          />
+        )}
+        <Icon className="relative size-5" />
       </TooltipTrigger>
       <TooltipContent side="right">{label}</TooltipContent>
     </Tooltip>
   );
 }
 
-export function NavBar({ avatar, isAdmin, onNavigate, onLogout }: NavBarProps) {
+export function NavBar() {
+  const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const userInfo = useAuthStore((state) => state.userInfo);
+  const { resolvedTheme, setTheme } = useTheme();
+
+  const current = activeSection(pathname);
+  const isDark = resolvedTheme === "dark";
+
+  const signOut = async () => {
+    await performLogout();
+    navigate("/login");
+  };
+
   return (
-    <nav className="border-border bg-muted/50 flex h-full w-16 flex-col items-center border-r py-4">
+    <nav className="border-border bg-muted/50 flex h-full w-16 shrink-0 flex-col items-center border-r py-4">
       <Avatar className="ring-primary/30 ring-offset-card size-10 ring-2 ring-offset-2 transition-transform duration-200 hover:scale-105">
-        <AvatarImage src={avatar} alt="Your avatar" />
-        <AvatarFallback>U</AvatarFallback>
+        <AvatarImage src={userInfo.avatar} alt={userInfo.nickname} />
+        <AvatarFallback>
+          {userInfo.nickname.charAt(0).toUpperCase() || "U"}
+        </AvatarFallback>
       </Avatar>
 
       <div className="mt-6 flex flex-col items-center gap-1">
@@ -103,7 +144,8 @@ export function NavBar({ avatar, isAdmin, onNavigate, onLogout }: NavBarProps) {
             key={item.path}
             label={item.label}
             icon={item.icon}
-            onClick={() => onNavigate(item.path)}
+            active={current === item.path}
+            onClick={() => navigate(item.path)}
           />
         ))}
       </div>
@@ -112,17 +154,23 @@ export function NavBar({ avatar, isAdmin, onNavigate, onLogout }: NavBarProps) {
 
       <div className="flex flex-col items-center gap-1">
         <div className="bg-border mb-2 h-px w-8" aria-hidden="true" />
-        {isAdmin && (
+        <RailButton
+          label={isDark ? "Light mode" : "Dark mode"}
+          icon={isDark ? Sun : Moon}
+          onClick={() => setTheme(isDark ? "light" : "dark")}
+        />
+        {userInfo.is_admin === 1 && (
           <RailButton
             label="Admin"
             icon={Settings}
-            onClick={() => onNavigate("/manager")}
+            active={current === "/manager"}
+            onClick={() => navigate("/manager")}
           />
         )}
         <RailButton
           label="Sign Out"
           icon={LogOut}
-          onClick={onLogout}
+          onClick={signOut}
           destructive
         />
       </div>

@@ -81,6 +81,10 @@ func InitIndexes() {
 			compoundIndex("contact_id", "status"),
 			compoundIndex("user_id", "contact_id"),
 		}},
+		{&model.ContactTag{}, []mongo.IndexModel{
+			uniqueUuidIndex(),
+			compoundIndex("user_id"),
+		}},
 	}
 	for _, spec := range specs {
 		if _, err := Engine.Model(spec.model).EnsureIndexes(ctx, spec.indexes); err != nil {

@@ -422,3 +422,111 @@ Content-Type: application/json
 # GET {{host}}/dashboard/ws
 # Upgrade: websocket
 # Connection: Upgrade
+
+### ===== Migrated capabilities (auth, tags, search, unread, calls, chunked upload) =====
+### Most POST endpoints now require: Authorization: {{token}} (from login/register response data.token)
+
+### Update password (public, forgot-password flow)
+POST {{host}}/user/update-password
+Content-Type: application/json
+
+{
+  "telephone": "18012345678",
+  "password": "654321"
+}
+
+### Search users by telephone/nickname keyword
+POST {{host}}/user/search-user
+Content-Type: application/json
+
+{
+  "owner_id": "U12345678901",
+  "keyword": "jane"
+}
+
+### Search groups by name keyword
+POST {{host}}/group/search-group
+Content-Type: application/json
+
+{
+  "owner_id": "U12345678901",
+  "keyword": "chat"
+}
+
+### Invite members into a group (skips existing members)
+POST {{host}}/group/invite-group-members
+Content-Type: application/json
+
+{
+  "group_id": "G12345678901",
+  "member_ids": ["U12345678902", "U12345678903"]
+}
+
+### Get contact tag list
+POST {{host}}/contact/get-tag-list
+Content-Type: application/json
+
+{
+  "owner_id": "U12345678901"
+}
+
+### Add a contact tag
+POST {{host}}/contact/add-tag
+Content-Type: application/json
+
+{
+  "owner_id": "U12345678901",
+  "name": "Colleagues"
+}
+
+### Update a contact's note name / tag
+POST {{host}}/contact/update-contact
+Content-Type: application/json
+
+{
+  "user_id": "U12345678901",
+  "contact_id": "U12345678902",
+  "note_name": "Bestie",
+  "tag_id": "T12345678901"
+}
+
+### Mark a session as read (clears unread count)
+POST {{host}}/session/mark-session-read
+Content-Type: application/json
+
+{
+  "owner_id": "U12345678901",
+  "receive_id": "U12345678902"
+}
+
+### Verify file before chunked upload (instant upload / resume)
+POST {{host}}/file/verify
+Content-Type: application/json
+
+{
+  "file_hash": "d41d8cd98f00b204e9800998ecf8427e",
+  "chunk_cnt": 3,
+  "ext_name": "mp4"
+}
+
+### Upload one chunk (multipart form: chunk, chunk_idx, file_hash, ext_name)
+# POST {{host}}/file/upload-chunk
+
+### Merge uploaded chunks
+POST {{host}}/file/merge
+Content-Type: application/json
+
+{
+  "file_hash": "d41d8cd98f00b204e9800998ecf8427e",
+  "ext_name": "mp4",
+  "file_name": "demo.mp4"
+}
+
+### List members of an active call room
+POST {{host}}/chatroom/get-callers
+Content-Type: application/json
+
+{
+  "room_id": "G12345678901",
+  "owner_id": "U12345678901"
+}

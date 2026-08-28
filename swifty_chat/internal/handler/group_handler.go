@@ -30,17 +30,48 @@ import (
 
 func CreateGroup(ctx *swifty_http.Context, next func()) {
 	var req struct {
-		Name    string `json:"name"`
-		OwnerId string `json:"owner_id"`
-		Avatar  string `json:"avatar"`
-		Notice  string `json:"notice"`
-		AddMode int8   `json:"add_mode"`
+		Name      string   `json:"name"`
+		OwnerId   string   `json:"owner_id"`
+		Avatar    string   `json:"avatar"`
+		Notice    string   `json:"notice"`
+		AddMode   int8     `json:"add_mode"`
+		MemberIds []string `json:"member_ids"`
 	}
 	if err := ctx.BindJSON(&req); err != nil {
 		JsonBack(ctx, "invalid request body", -1, nil)
 		return
 	}
-	msg, data, ret := service.CreateGroup(ctx.Request.Context(), req.Name, req.OwnerId, req.Avatar, req.Notice, req.AddMode)
+	msg, data, ret := service.CreateGroup(ctx.Request.Context(), req.Name, req.OwnerId, req.Avatar, req.Notice, req.AddMode, req.MemberIds)
+	JsonBack(ctx, msg, ret, data)
+}
+
+func InviteGroupMembers(ctx *swifty_http.Context, next func()) {
+	var req struct {
+		GroupId   string   `json:"group_id"`
+		MemberIds []string `json:"member_ids"`
+	}
+	if err := ctx.BindJSON(&req); err != nil {
+		JsonBack(ctx, "invalid request body", -1, nil)
+		return
+	}
+	if len(req.MemberIds) == 0 {
+		JsonBack(ctx, "member_ids is required", -2, nil)
+		return
+	}
+	msg, ret := service.InviteGroupMembers(ctx.Request.Context(), req.GroupId, req.MemberIds)
+	JsonBack(ctx, msg, ret, nil)
+}
+
+func SearchGroup(ctx *swifty_http.Context, next func()) {
+	var req struct {
+		OwnerId string `json:"owner_id"`
+		Keyword string `json:"keyword"`
+	}
+	if err := ctx.BindJSON(&req); err != nil {
+		JsonBack(ctx, "invalid request body", -1, nil)
+		return
+	}
+	msg, data, ret := service.SearchGroups(ctx.Request.Context(), req.OwnerId, req.Keyword)
 	JsonBack(ctx, msg, ret, data)
 }
 

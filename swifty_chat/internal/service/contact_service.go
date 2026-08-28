@@ -23,6 +23,7 @@ package service
 import (
 	"context"
 	"log"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
@@ -67,6 +68,73 @@ type ContactListItem struct {
 	Nickname string `json:"nickname"`
 	Avatar   string `json:"avatar"`
 	Status   int8   `json:"status"`
+	NoteName string `json:"note_name"`
+	TagId    string `json:"tag_id"`
+	Online   bool   `json:"online"`
+}
+
+type TagItem struct {
+	TagId string `json:"tag_id"`
+	Name  string `json:"name"`
+}
+
+// GetTagList returns the caller's contact tags in creation order.
+func GetTagList(ctx context.Context, ownerId string) (string, []TagItem, int) {
+	var tags []model.ContactTag
+	err := dao.ActiveQuery(&tags).Where("user_id", ownerId).OrderBy("created_at").Find(ctx, &tags)
+	if err != nil {
+		log.Println(err)
+		return constant.SystemError, nil, -1
+	}
+	var list []TagItem
+	for _, t := range tags {
+		list = append(list, TagItem{TagId: t.Uuid, Name: t.Name})
+	}
+	return "success", list, 0
+}
+
+func AddTag(ctx context.Context, ownerId, name string) (string, *TagItem, int) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "tag name is required", nil, -2
+	}
+	var existing model.ContactTag
+	if err := dao.ActiveQuery(&existing).Where("user_id", ownerId).Where("name", name).First(ctx, &existing); err == nil {
+		return "tag already exists", nil, -2
+	}
+	tag := model.ContactTag{
+		Uuid:      "T" + util.GetNowAndLenRandomString(11),
+		UserId:    ownerId,
+		Name:      name,
+		CreatedAt: time.Now(),
+	}
+	if _, err := dao.Engine.Model(&tag).Insert(ctx, &tag); err != nil {
+		log.Println(err)
+		return constant.SystemError, nil, -1
+	}
+	return "tag created", &TagItem{TagId: tag.Uuid, Name: tag.Name}, 0
+}
+
+// UpdateContact edits the note name and/or tag of one of the caller's
+// contacts. Nil pointers leave the field untouched.
+func UpdateContact(ctx context.Context, userId, contactId string, noteName, tagId *string) (string, int) {
+	fields := bson.M{"updated_at": time.Now()}
+	if noteName != nil {
+		fields["note_name"] = *noteName
+	}
+	if tagId != nil {
+		fields["tag_id"] = *tagId
+	}
+	if len(fields) == 1 {
+		return "nothing to update", -2
+	}
+	if _, err := dao.Engine.Model(&model.UserContact{}).
+		Where("user_id", userId).Where("contact_id", contactId).WhereNull("deleted_at").
+		Update(ctx, fields); err != nil {
+		log.Println(err)
+		return constant.SystemError, -1
+	}
+	return "contact updated", 0
 }
 
 // userNamesByUuid batch-loads nicknames for the given user ids.
@@ -101,10 +169,10 @@ func GetUserList(ctx context.Context, ownerId string) (string, []ContactListItem
 	}
 
 	ids := make([]string, 0, len(contacts))
-	statusById := make(map[string]int8, len(contacts))
-	for _, c := range contacts {
-		ids = append(ids, c.ContactId)
-		statusById[c.ContactId] = c.Status
+	contactById := make(map[string]*model.UserContact, len(contacts))
+	for i := range contacts {
+		ids = append(ids, contacts[i].ContactId)
+		contactById[contacts[i].ContactId] = &contacts[i]
 	}
 	if len(ids) == 0 {
 		return "success", nil, 0
@@ -116,9 +184,14 @@ func GetUserList(ctx context.Context, ownerId string) (string, []ContactListItem
 	}
 	var list []ContactListItem
 	for _, user := range users {
+		c := contactById[user.Uuid]
+		if c == nil {
+			continue
+		}
 		list = append(list, ContactListItem{
 			UserId: user.Uuid, Nickname: user.Nickname, Avatar: user.Avatar,
-			Status: statusById[user.Uuid],
+			Status: c.Status, NoteName: c.NoteName, TagId: c.TagId,
+			Online: IsOnline(user.Uuid),
 		})
 	}
 	return "success", list, 0
@@ -240,6 +313,7 @@ func ApplyContact(ctx context.Context, userId, contactId string, contactType int
 			log.Println(err)
 			return constant.SystemError, -1
 		}
+		notifyApplyRecipient(ctx, contactId, contactType)
 		return "application submitted", 0
 	}
 	if err != swifty_orm.ErrNotFound {
@@ -260,7 +334,21 @@ func ApplyContact(ctx context.Context, userId, contactId string, contactType int
 		log.Println(err)
 		return constant.SystemError, -1
 	}
+	notifyApplyRecipient(ctx, contactId, contactType)
 	return "application submitted", 0
+}
+
+// notifyApplyRecipient pushes an apply notification to whoever reviews it:
+// the target user for friend applies, the group owner for join applies.
+func notifyApplyRecipient(ctx context.Context, contactId string, contactType int8) {
+	if contactType == constant.ContactTypeUser {
+		PushSystem(constant.NotifyApply, contactId)
+		return
+	}
+	var group model.GroupInfo
+	if err := dao.ActiveQuery(&group).Where("uuid", contactId).First(ctx, &group); err == nil {
+		PushSystem(constant.NotifyApply, group.OwnerId)
+	}
 }
 
 // GetNewContactList returns pending friend applications addressed to the user.
@@ -369,6 +457,12 @@ func PassContactApply(ctx context.Context, applyId string) (string, int) {
 		log.Printf("PassContactApply %s failed: %v", applyId, err)
 		return constant.SystemError, -1
 	}
+	if apply.ContactType == constant.ContactTypeGroup {
+		PushSystem(constant.NotifyGroup, apply.UserId)
+		PushSystem(constant.NotifySession, apply.UserId)
+	} else {
+		PushSystem(constant.NotifyContact, apply.UserId, apply.ContactId)
+	}
 	return "application approved", 0
 }
 
@@ -393,6 +487,7 @@ func BlackContact(ctx context.Context, userId, contactId string) (string, int) {
 		log.Printf("BlackContact: session cleanup failed: %v", err)
 	}
 	_ = dao.SessionListCache.Delete(ctx, userId)
+	PushSystem(constant.NotifyContact, contactId)
 	return "contact blocked", 0
 }
 
@@ -410,6 +505,7 @@ func CancelBlackContact(ctx context.Context, userId, contactId string) (string, 
 		log.Println(err)
 		return constant.SystemError, -1
 	}
+	PushSystem(constant.NotifyContact, contactId)
 	return "contact unblocked", 0
 }
 
@@ -456,6 +552,8 @@ func DeleteContact(ctx context.Context, userId, contactId string) (string, int) 
 	}
 	_ = dao.SessionListCache.Delete(ctx, userId)
 	_ = dao.SessionListCache.Delete(ctx, contactId)
+	PushSystem(constant.NotifyContact, contactId)
+	PushSystem(constant.NotifySession, contactId)
 	return "deleted", 0
 }
 

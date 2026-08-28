@@ -20,14 +20,28 @@
  * SOFTWARE.
  */
 
-import { CheckCheck, Download, FileText, MessageCircle } from "lucide-react";
+import { Download, FileText, MessageCircle } from "lucide-react";
+import { motion } from "motion/react";
+import { lazy, Suspense } from "react";
 
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { BASE_URL } from "@/config";
+import { staticUrl } from "@/env";
 import { cn } from "@/lib/utils";
-import type { Message } from "@/types";
+import { MessageType, type Message } from "@/service/schemas";
+import {
+  formatMessageDay,
+  formatMessageTime,
+  messageDayKey,
+} from "@/utils/format";
+
+// Markdown brings shiki, katex and mermaid with it, so it ships as its own chunk.
+const MessageContent = lazy(() =>
+  import("@/components/message-content").then((module) => ({
+    default: module.MessageContent,
+  })),
+);
 
 interface MessageBubbleProps {
   messageList: Message[];
@@ -36,38 +50,22 @@ interface MessageBubbleProps {
   currentUserName: string;
 }
 
-const FILE_MESSAGE = 2;
-const STAGGER_STEP_MS = 40;
-const STAGGER_CAP_MS = 320;
-
-const downloadFile = (url: string, name: string) => {
-  const fileUrl = url
-    ? url.startsWith("http")
-      ? url
-      : BASE_URL + url
-    : BASE_URL + "/static/files/" + name;
-  const saveName = name || "download";
-  fetch(fileUrl)
-    .then((r) => {
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      return r.blob();
-    })
-    .then((blob) => {
-      const link = document.createElement("a");
-      link.href = URL.createObjectURL(blob);
-      link.download = saveName;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(link.href);
-    })
-    .catch(() => {});
-};
-
-function formatTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+async function downloadFile(url: string, name: string) {
+  const fileUrl = url ? staticUrl(url) : staticUrl(`/static/files/${name}`);
+  try {
+    const response = await fetch(fileUrl);
+    if (!response.ok) return;
+    const objectUrl = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = name || "download";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(objectUrl);
+  } catch {
+    // A failed download needs no recovery beyond leaving the bubble untouched.
+  }
 }
 
 function initialOf(name: string): string {
@@ -87,7 +85,7 @@ function FileAttachment({
     <div className="flex items-center gap-3">
       <span
         className={cn(
-          "flex size-10 shrink-0 items-center justify-center rounded-xl transition-colors duration-300",
+          "flex size-10 shrink-0 items-center justify-center rounded-xl",
           isSelf
             ? "bg-primary-foreground/15 text-primary-foreground"
             : "bg-muted text-primary",
@@ -114,7 +112,7 @@ function FileAttachment({
         <Button
           variant="outline"
           size="sm"
-          onClick={() => downloadFile(message.url, fileName)}
+          onClick={() => void downloadFile(message.url, fileName)}
         >
           <Download />
           Download
@@ -122,6 +120,38 @@ function FileAttachment({
       </div>
     </div>
   );
+}
+
+function Attachment({
+  message,
+  isSelf,
+}: {
+  message: Message;
+  isSelf: boolean;
+}) {
+  if (message.type === MessageType.Image) {
+    return (
+      <a href={staticUrl(message.url)} target="_blank" rel="noreferrer">
+        <img
+          src={staticUrl(message.url)}
+          alt={message.file_name || "image"}
+          loading="lazy"
+          className="max-h-60 rounded-lg object-cover"
+        />
+      </a>
+    );
+  }
+  if (message.type === MessageType.Video) {
+    return (
+      <video
+        controls
+        preload="metadata"
+        src={staticUrl(message.url)}
+        className="max-h-60 rounded-lg"
+      />
+    );
+  }
+  return <FileAttachment message={message} isSelf={isSelf} />;
 }
 
 export function MessageBubble({
@@ -132,12 +162,17 @@ export function MessageBubble({
 }: MessageBubbleProps) {
   if (messageList.length === 0) {
     return (
-      <div className="animate-in fade-in flex flex-1 flex-col items-center justify-center gap-3 py-20 duration-500">
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.4 }}
+        className="flex flex-1 flex-col items-center justify-center gap-3 py-20"
+      >
         <span className="bg-muted/70 flex size-12 items-center justify-center rounded-full">
           <MessageCircle className="text-muted-foreground/60 size-5" />
         </span>
         <p className="text-muted-foreground/60 text-sm">No messages yet</p>
-      </div>
+      </motion.div>
     );
   }
 
@@ -147,67 +182,73 @@ export function MessageBubble({
         const isSelf = message.send_id === currentUserId;
         const name = isSelf ? currentUserName : message.send_name;
         const avatar = isSelf ? currentUserAvatar : message.send_avatar;
-        const isFile = message.type === FILE_MESSAGE;
+        const isText = message.type === MessageType.Text;
+        const dayKey = messageDayKey(message.created_at);
+        const showDay =
+          index === 0 ||
+          messageDayKey(messageList[index - 1].created_at) !== dayKey;
 
         return (
-          <div
-            key={
-              message.uuid ||
-              `${message.send_id}-${message.created_at}-${message.type}-${index}`
-            }
-            className={cn(
-              "animate-in fade-in slide-in-from-bottom-2 flex items-start gap-2.5 duration-300",
-              isSelf && "flex-row-reverse",
+          <div key={message.uuid || `${message.send_id}-${index}`}>
+            {showDay && (
+              <div className="text-muted-foreground/70 mb-4 text-center text-[11px]">
+                {formatMessageDay(message.created_at)}
+              </div>
             )}
-            style={{
-              animationDelay: `${Math.min(index * STAGGER_STEP_MS, STAGGER_CAP_MS)}ms`,
-            }}
-          >
-            <Avatar
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
               className={cn(
-                "size-9 transition-transform duration-300 hover:scale-105",
-                isSelf && "ring-primary/30 ring-2",
+                "flex items-start gap-2.5",
+                isSelf && "flex-row-reverse",
               )}
             >
-              <AvatarImage src={avatar} alt={name} />
-              <AvatarFallback>{initialOf(name)}</AvatarFallback>
-            </Avatar>
-
-            <div
-              className={cn(
-                "flex min-w-0 flex-col gap-1",
-                isSelf ? "items-end" : "items-start",
-              )}
-            >
-              <span className="text-muted-foreground flex items-baseline gap-2 px-1 text-xs">
-                <span className="font-medium">{name}</span>
-                <span className="tabular-nums opacity-70">
-                  {formatTime(message.created_at)}
-                </span>
-              </span>
+              <Avatar
+                className={cn(
+                  "size-9 transition-transform duration-300 hover:scale-105",
+                  isSelf && "ring-primary/30 ring-2",
+                )}
+              >
+                <AvatarImage src={avatar} alt={name} />
+                <AvatarFallback>{initialOf(name)}</AvatarFallback>
+              </Avatar>
 
               <div
                 className={cn(
-                  "max-w-[70%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed break-words transition-shadow duration-300",
-                  isSelf
-                    ? "bg-primary text-primary-foreground hover:shadow-primary/20 rounded-br-md hover:shadow-md"
-                    : "border-border bg-card text-foreground rounded-bl-md border shadow-sm hover:shadow-md",
+                  "flex min-w-0 flex-col gap-1",
+                  isSelf ? "items-end" : "items-start",
                 )}
               >
-                {isFile ? (
-                  <FileAttachment message={message} isSelf={isSelf} />
-                ) : (
-                  <p className="whitespace-pre-wrap">{message.content}</p>
-                )}
-              </div>
-
-              {isSelf && isFile && (
-                <span className="text-muted-foreground flex items-center gap-1 px-1 text-xs opacity-70">
-                  <CheckCheck className="size-3" />
-                  Sent
+                <span className="text-muted-foreground flex items-baseline gap-2 px-1 text-xs">
+                  <span className="font-medium">{name}</span>
+                  <span className="tabular-nums opacity-70">
+                    {formatMessageTime(message.created_at)}
+                  </span>
                 </span>
-              )}
-            </div>
+
+                <div
+                  className={cn(
+                    "max-w-[70%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed break-words transition-shadow duration-300",
+                    isSelf
+                      ? "bg-primary text-primary-foreground hover:shadow-primary/20 rounded-br-md hover:shadow-md"
+                      : "border-border bg-card text-foreground rounded-bl-md border shadow-sm hover:shadow-md",
+                  )}
+                >
+                  {isText ? (
+                    <Suspense
+                      fallback={
+                        <p className="whitespace-pre-wrap">{message.content}</p>
+                      }
+                    >
+                      <MessageContent content={message.content} />
+                    </Suspense>
+                  ) : (
+                    <Attachment message={message} isSelf={isSelf} />
+                  )}
+                </div>
+              </div>
+            </motion.div>
           </div>
         );
       })}

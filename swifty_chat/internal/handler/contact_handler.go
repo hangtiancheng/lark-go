@@ -38,6 +38,46 @@ func GetUserList(ctx *swifty_http.Context, next func()) {
 	JsonBack(ctx, msg, ret, data)
 }
 
+func GetTagList(ctx *swifty_http.Context, next func()) {
+	var req struct {
+		OwnerId string `json:"owner_id"`
+	}
+	if err := ctx.BindJSON(&req); err != nil {
+		JsonBack(ctx, "invalid request body", -1, nil)
+		return
+	}
+	msg, data, ret := service.GetTagList(ctx.Request.Context(), req.OwnerId)
+	JsonBack(ctx, msg, ret, data)
+}
+
+func AddTag(ctx *swifty_http.Context, next func()) {
+	var req struct {
+		OwnerId string `json:"owner_id"`
+		Name    string `json:"name"`
+	}
+	if err := ctx.BindJSON(&req); err != nil {
+		JsonBack(ctx, "invalid request body", -1, nil)
+		return
+	}
+	msg, data, ret := service.AddTag(ctx.Request.Context(), req.OwnerId, req.Name)
+	JsonBack(ctx, msg, ret, data)
+}
+
+func UpdateContact(ctx *swifty_http.Context, next func()) {
+	var req struct {
+		UserId    string  `json:"user_id"`
+		ContactId string  `json:"contact_id"`
+		NoteName  *string `json:"note_name"`
+		TagId     *string `json:"tag_id"`
+	}
+	if err := ctx.BindJSON(&req); err != nil {
+		JsonBack(ctx, "invalid request body", -1, nil)
+		return
+	}
+	msg, ret := service.UpdateContact(ctx.Request.Context(), req.UserId, req.ContactId, req.NoteName, req.TagId)
+	JsonBack(ctx, msg, ret, nil)
+}
+
 func LoadMyJoinedGroup(ctx *swifty_http.Context, next func()) {
 	var req struct {
 		OwnerId string `json:"owner_id"`

@@ -20,12 +20,15 @@
  * SOFTWARE.
  */
 
+import NumberFlow from "@number-flow/react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { xor } from "es-toolkit";
+import { ChartBar } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Shield } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Table,
@@ -35,486 +38,411 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { api } from "../service/api";
-import useAuthStore from "../store/auth";
-import { showToast } from "../utils/toast";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useWindowedRows } from "@/lib/use-windowed-rows";
+import { group, user } from "@/service/api";
+import { adminGroupsQuery, adminUsersQuery, keys } from "@/service/queries";
+import useAuthStore from "@/store/auth";
+import { showToast } from "@/utils/toast";
 
-type Panel =
-  | "none"
-  | "disable-user"
-  | "delete-user"
-  | "set-admin"
-  | "disable-group"
-  | "delete-group";
+const ROW_HEIGHT = 44;
+const BANNED = 1;
 
-interface UserRow {
-  uuid: string;
-  nickname: string;
-  telephone: string;
-  is_admin: number;
-  status: number;
-  is_deleted?: boolean;
+interface BulkAction {
+  run: (ids: string[]) => Promise<void>;
+  done: string;
+  staleKey: readonly unknown[];
 }
 
-interface GroupRow {
-  group_id: string;
-  name: string;
-  owner_id: string;
-  member_cnt: number;
-  avatar: string;
-  status: number;
-  is_deleted?: boolean;
-}
-
-const USER_PANELS: { panel: Panel; label: string }[] = [
-  { panel: "disable-user", label: "Enable / Disable" },
-  { panel: "delete-user", label: "Delete" },
-  { panel: "set-admin", label: "Set as Admin" },
-];
-
-const GROUP_PANELS: { panel: Panel; label: string }[] = [
-  { panel: "disable-group", label: "Enable / Disable" },
-  { panel: "delete-group", label: "Delete / Disband" },
-];
-
-function MenuItem({
-  active,
-  label,
-  onSelect,
+function SelectionBar({
+  count,
+  children,
 }: {
-  active: boolean;
-  label: string;
-  onSelect: () => void;
+  count: number;
+  children: React.ReactNode;
 }) {
   return (
-    <Button
-      variant="ghost"
-      aria-current={active ? "page" : undefined}
-      className={`hover:bg-accent w-full justify-start rounded-none px-4 py-2 font-normal transition-colors ${
-        active ? "bg-accent text-foreground" : "text-muted-foreground"
-      }`}
-      onClick={onSelect}
-    >
-      {label}
-    </Button>
-  );
-}
-
-function MenuSection({ title }: { title: string }) {
-  return (
-    <div className="text-primary px-4 pt-4 pb-1.5 text-xs font-semibold tracking-wider uppercase">
-      {title}
+    <div className="flex flex-wrap items-center gap-2">
+      <span className="text-muted-foreground text-xs tabular-nums">
+        <NumberFlow value={count} /> selected
+      </span>
+      {children}
     </div>
   );
 }
 
 export default function Manager() {
   const navigate = useNavigate();
-  const [currentPanel, setCurrentPanel] = useState<Panel>("none");
-  const [userList, setUserList] = useState<UserRow[]>([]);
-  const [groupList, setGroupList] = useState<GroupRow[]>([]);
-  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
-  const [selectedGroupIds, setSelectedGroupIds] = useState<string[]>([]);
+  const queryClient = useQueryClient();
+  const userId = useAuthStore((state) => state.userInfo.uuid);
 
-  const loadUserList = async () => {
-    const uid = useAuthStore.getState().userInfo.uuid;
-    const res = await api.getUserInfoList({ owner_id: uid });
-    if (res.code !== 200) {
-      showToast(res.message || "Failed to load users", "error");
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
+  const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
+
+  const users = useQuery(adminUsersQuery(userId));
+  const groups = useQuery(adminGroupsQuery());
+
+  const bulk = useMutation({
+    mutationFn: ({ action, ids }: { action: BulkAction; ids: string[] }) =>
+      action.run(ids),
+    onSuccess: (_result, { action }) => {
+      showToast(action.done, "success");
+      void queryClient.invalidateQueries({ queryKey: action.staleKey });
+      setSelectedUsers([]);
+      setSelectedGroups([]);
+    },
+  });
+
+  const userRows = users.data ?? [];
+  const groupRows = groups.data ?? [];
+
+  const {
+    scrollRef: usersScrollRef,
+    items: userItems,
+    paddingTop: usersPaddingTop,
+    paddingBottom: usersPaddingBottom,
+  } = useWindowedRows(userRows.length, ROW_HEIGHT);
+  const {
+    scrollRef: groupsScrollRef,
+    items: groupItems,
+    paddingTop: groupsPaddingTop,
+    paddingBottom: groupsPaddingBottom,
+  } = useWindowedRows(groupRows.length, ROW_HEIGHT);
+
+  const runOnUsers = (action: BulkAction) => {
+    if (selectedUsers.length === 0) {
+      showToast("Select at least one row", "warning");
       return;
     }
-    setUserList((res.data as UserRow[]) || []);
-    setSelectedUserIds([]);
+    bulk.mutate({ action, ids: selectedUsers });
   };
 
-  const loadGroupList = async () => {
-    const res = await api.getGroupInfoList({});
-    if (res.code !== 200) {
-      showToast(res.message || "Failed to load groups", "error");
+  const runOnGroups = (action: BulkAction) => {
+    if (selectedGroups.length === 0) {
+      showToast("Select at least one row", "warning");
       return;
     }
-    setGroupList((res.data as GroupRow[]) || []);
-    setSelectedGroupIds([]);
+    bulk.mutate({ action, ids: selectedGroups });
   };
 
-  const showPanel = (panel: Panel) => {
-    setCurrentPanel(panel);
-    setSelectedUserIds([]);
-    setSelectedGroupIds([]);
-    if (
-      panel === "disable-user" ||
-      panel === "delete-user" ||
-      panel === "set-admin"
-    ) {
-      loadUserList();
-    } else if (panel === "disable-group" || panel === "delete-group") {
-      loadGroupList();
-    }
+  const userActions: Record<string, BulkAction> = {
+    enable: {
+      run: user.enable,
+      done: "Accounts enabled",
+      staleKey: keys.users.all,
+    },
+    disable: {
+      run: user.disable,
+      done: "Accounts disabled",
+      staleKey: keys.users.all,
+    },
+    remove: {
+      run: user.remove,
+      done: "Accounts deleted",
+      staleKey: keys.users.all,
+    },
+    promote: {
+      run: (ids) => user.setAdmin(ids, 1),
+      done: "Admin granted",
+      staleKey: keys.users.all,
+    },
+    demote: {
+      run: (ids) => user.setAdmin(ids, 0),
+      done: "Admin revoked",
+      staleKey: keys.users.all,
+    },
   };
 
-  const toggleUser = (uuid: string, checked: boolean) => {
-    setSelectedUserIds((prev) =>
-      checked ? [...prev, uuid] : prev.filter((id) => id !== uuid),
-    );
+  const groupActions: Record<string, BulkAction> = {
+    enable: {
+      run: (ids) => group.setStatus(ids, 0),
+      done: "Groups enabled",
+      staleKey: keys.groups.all,
+    },
+    disable: {
+      run: (ids) => group.setStatus(ids, BANNED),
+      done: "Groups disabled",
+      staleKey: keys.groups.all,
+    },
+    remove: {
+      run: group.removeAll,
+      done: "Groups deleted",
+      staleKey: keys.groups.all,
+    },
   };
 
-  const toggleAllUsers = (checked: boolean) => {
-    setSelectedUserIds(checked ? userList.map((u) => u.uuid) : []);
-  };
-
-  const toggleGroup = (uuid: string, checked: boolean) => {
-    setSelectedGroupIds((prev) =>
-      checked ? [...prev, uuid] : prev.filter((id) => id !== uuid),
-    );
-  };
-
-  const toggleAllGroups = (checked: boolean) => {
-    setSelectedGroupIds(checked ? groupList.map((g) => g.group_id) : []);
-  };
-
-  const requireSelection = (ids: string[], msg: string): boolean => {
-    if (ids.length === 0) {
-      showToast(msg, "warning");
-      return false;
-    }
-    return true;
-  };
-
-  const runUserAction = async (
-    action: () => Promise<{ code: number; message: string }>,
-    successMsg: string,
-  ) => {
-    const res = await action();
-    if (res.code === 200) {
-      showToast(successMsg, "success");
-      loadUserList();
-    } else {
-      showToast(res.message || "Operation failed", "error");
-    }
-  };
-
-  const runGroupAction = async (
-    action: () => Promise<{ code: number; message: string }>,
-    successMsg: string,
-  ) => {
-    const res = await action();
-    if (res.code === 200) {
-      showToast(successMsg, "success");
-      loadGroupList();
-    } else {
-      showToast(res.message || "Operation failed", "error");
-    }
-  };
-
-  const enableSelectedUsers = async () => {
-    if (!requireSelection(selectedUserIds, "No users selected")) return;
-    await runUserAction(
-      () => api.ableUsers({ uuid_list: selectedUserIds }),
-      "Users enabled",
-    );
-  };
-
-  const disableSelectedUsers = async () => {
-    if (!requireSelection(selectedUserIds, "No users selected")) return;
-    await runUserAction(
-      () => api.disableUsers({ uuid_list: selectedUserIds }),
-      "Users disabled",
-    );
-  };
-
-  const deleteSelectedUsers = async () => {
-    if (!requireSelection(selectedUserIds, "No users selected")) return;
-    await runUserAction(
-      () => api.deleteUsers({ uuid_list: selectedUserIds }),
-      "Users deleted",
-    );
-  };
-
-  const setAdminSelected = async (isAdmin: number) => {
-    if (!requireSelection(selectedUserIds, "No users selected")) return;
-    await runUserAction(
-      () => api.setAdmin({ uuid_list: selectedUserIds, is_admin: isAdmin }),
-      isAdmin ? "Admin granted" : "Admin revoked",
-    );
-  };
-
-  const enableSelectedGroups = async () => {
-    if (!requireSelection(selectedGroupIds, "No groups selected")) return;
-    await runGroupAction(
-      () => api.setGroupsStatus({ uuid_list: selectedGroupIds, status: 0 }),
-      "Groups enabled",
-    );
-  };
-
-  const disableSelectedGroups = async () => {
-    if (!requireSelection(selectedGroupIds, "No groups selected")) return;
-    await runGroupAction(
-      () => api.setGroupsStatus({ uuid_list: selectedGroupIds, status: 1 }),
-      "Groups disabled",
-    );
-  };
-
-  const deleteSelectedGroups = async () => {
-    if (!requireSelection(selectedGroupIds, "No groups selected")) return;
-    await runGroupAction(
-      () => api.deleteGroups({ uuid_list: selectedGroupIds }),
-      "Groups deleted",
-    );
-  };
-
-  const backToChat = () => navigate("/chat/sessions");
-
-  const isUserPanel =
-    currentPanel === "disable-user" ||
-    currentPanel === "delete-user" ||
-    currentPanel === "set-admin";
-  const isGroupPanel =
-    currentPanel === "disable-group" || currentPanel === "delete-group";
-  const allUsersChecked =
-    userList.length > 0 && selectedUserIds.length === userList.length;
-  const allGroupsChecked =
-    groupList.length > 0 && selectedGroupIds.length === groupList.length;
+  const allUsersSelected =
+    userRows.length > 0 && selectedUsers.length === userRows.length;
+  const allGroupsSelected =
+    groupRows.length > 0 && selectedGroups.length === groupRows.length;
 
   return (
-    <div className="bg-background flex min-h-screen items-center justify-center p-4">
-      <Card className="shadow-primary/5 h-[600px] w-[1000px] gap-0 py-0 shadow-xl">
-        <div className="border-border bg-muted/30 flex h-14 shrink-0 items-center justify-between border-b px-6">
-          <div className="flex items-center gap-3">
-            <Shield size={24} className="text-primary" />
-            <span className="text-foreground text-lg font-semibold">
-              Admin Panel
-            </span>
-          </div>
-          <Button variant="ghost" size="sm" onClick={backToChat}>
-            Back
-          </Button>
-        </div>
+    <div className="flex min-w-0 flex-1 flex-col gap-3 p-4">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold">Administration</h2>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => navigate("/dashboard")}
+        >
+          <ChartBar className="size-3.5" />
+          Cache Dashboard
+        </Button>
+      </div>
 
-        <div className="flex flex-1 overflow-hidden">
-          <div className="border-border bg-muted/30 w-48 shrink-0 overflow-y-auto border-r">
-            <MenuSection title="Users" />
-            <div className="flex flex-col gap-0.5 px-2">
-              {USER_PANELS.map(({ panel, label }) => (
-                <MenuItem
-                  key={panel}
-                  active={currentPanel === panel}
-                  label={label}
-                  onSelect={() => showPanel(panel)}
-                />
-              ))}
-            </div>
-            <MenuSection title="Groups" />
-            <div className="flex flex-col gap-0.5 px-2">
-              {GROUP_PANELS.map(({ panel, label }) => (
-                <MenuItem
-                  key={panel}
-                  active={currentPanel === panel}
-                  label={label}
-                  onSelect={() => showPanel(panel)}
-                />
-              ))}
-            </div>
-          </div>
+      <Tabs defaultValue="users" className="min-h-0 flex-1">
+        <TabsList className="w-64">
+          <TabsTrigger value="users">Users</TabsTrigger>
+          <TabsTrigger value="groups">Groups</TabsTrigger>
+        </TabsList>
 
-          <div className="flex-1 overflow-y-auto">
-            {currentPanel === "none" && (
-              <div className="flex h-full items-center justify-center">
-                <p className="text-muted-foreground text-sm">
-                  Select an option from the left menu
-                </p>
-              </div>
-            )}
+        <TabsContent value="users" className="flex min-h-0 flex-col gap-2">
+          <SelectionBar count={selectedUsers.length}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => runOnUsers(userActions.enable)}
+            >
+              Enable
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => runOnUsers(userActions.disable)}
+            >
+              Disable
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => runOnUsers(userActions.promote)}
+            >
+              Grant Admin
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => runOnUsers(userActions.demote)}
+            >
+              Revoke Admin
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => runOnUsers(userActions.remove)}
+            >
+              Delete
+            </Button>
+          </SelectionBar>
 
-            {isUserPanel && (
-              <div className="p-4">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="w-10">
-                        <Checkbox
-                          checked={allUsersChecked}
-                          onCheckedChange={(checked) =>
-                            toggleAllUsers(checked === true)
-                          }
-                          aria-label="Select all users"
-                        />
-                      </TableHead>
-                      <TableHead>UUID</TableHead>
-                      <TableHead>Nickname</TableHead>
-                      <TableHead>Phone</TableHead>
-                      <TableHead>Admin</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {userList.map((user) => (
-                      <TableRow key={user.uuid} className="hover:bg-accent/50">
-                        <TableCell>
-                          <Checkbox
-                            checked={selectedUserIds.includes(user.uuid)}
-                            onCheckedChange={(checked) =>
-                              toggleUser(user.uuid, checked === true)
-                            }
-                            aria-label={`Select user ${user.nickname}`}
-                          />
-                        </TableCell>
-                        <TableCell className="text-muted-foreground font-mono text-xs">
-                          {user.uuid}
-                        </TableCell>
-                        <TableCell>{user.nickname}</TableCell>
-                        <TableCell>{user.telephone}</TableCell>
-                        <TableCell>
-                          {user.is_admin === 1 ? (
-                            <Badge
-                              variant="secondary"
-                              className="bg-success/15 text-success"
-                            >
-                              Yes
-                            </Badge>
-                          ) : (
-                            <Badge variant="outline">No</Badge>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          {user.status === 1 ? (
-                            <Badge
-                              variant="destructive"
-                              className="bg-destructive/15 text-destructive border-0"
-                            >
-                              Disabled
-                            </Badge>
-                          ) : (
-                            <Badge className="bg-success/15 text-success border-0">
-                              Active
-                            </Badge>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-                <div className="mt-4 flex justify-end gap-2">
-                  {currentPanel === "disable-user" && (
-                    <>
-                      <Button onClick={enableSelectedUsers}>Enable</Button>
-                      <Button
-                        variant="destructive"
-                        onClick={disableSelectedUsers}
-                      >
-                        Disable
-                      </Button>
-                    </>
-                  )}
-                  {currentPanel === "delete-user" && (
-                    <Button variant="destructive" onClick={deleteSelectedUsers}>
-                      Delete
-                    </Button>
-                  )}
-                  {currentPanel === "set-admin" && (
-                    <>
-                      <Button onClick={() => setAdminSelected(1)}>
-                        Grant Admin
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        onClick={() => setAdminSelected(0)}
-                      >
-                        Revoke Admin
-                      </Button>
-                    </>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {isGroupPanel && (
-              <div className="p-4">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="hover:bg-transparent">
-                      <TableHead className="w-10">
-                        <Checkbox
-                          checked={allGroupsChecked}
-                          onCheckedChange={(checked) =>
-                            toggleAllGroups(checked === true)
-                          }
-                          aria-label="Select all groups"
-                        />
-                      </TableHead>
-                      <TableHead>Group ID</TableHead>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Owner</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {groupList.map((group) => (
-                      <TableRow
-                        key={group.group_id}
-                        className="hover:bg-accent/50"
-                      >
-                        <TableCell>
-                          <Checkbox
-                            checked={selectedGroupIds.includes(group.group_id)}
-                            onCheckedChange={(checked) =>
-                              toggleGroup(group.group_id, checked === true)
-                            }
-                            aria-label={`Select group ${group.name}`}
-                          />
-                        </TableCell>
-                        <TableCell className="text-muted-foreground font-mono text-xs">
-                          {group.group_id}
-                        </TableCell>
-                        <TableCell>{group.name}</TableCell>
-                        <TableCell className="text-muted-foreground font-mono text-xs">
-                          {group.owner_id}
-                        </TableCell>
-                        <TableCell>
-                          {group.is_deleted ? (
-                            <Badge variant="outline">Deleted</Badge>
-                          ) : group.status === 1 ? (
-                            <Badge
-                              variant="destructive"
-                              className="bg-destructive/15 text-destructive border-0"
-                            >
-                              Disabled
-                            </Badge>
-                          ) : (
-                            <Badge className="bg-success/15 text-success border-0">
-                              Active
-                            </Badge>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-                <div className="mt-4 flex justify-end gap-2">
-                  {currentPanel === "disable-group" && (
-                    <>
-                      <Button onClick={enableSelectedGroups}>Enable</Button>
-                      <Button
-                        variant="destructive"
-                        onClick={disableSelectedGroups}
-                      >
-                        Disable
-                      </Button>
-                    </>
-                  )}
-                  {currentPanel === "delete-group" && (
-                    <Button
-                      variant="destructive"
-                      onClick={deleteSelectedGroups}
+          <div
+            ref={usersScrollRef}
+            className="border-border min-h-0 flex-1 overflow-y-auto rounded-md border"
+          >
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={allUsersSelected}
+                      onCheckedChange={(checked) =>
+                        setSelectedUsers(
+                          checked === true
+                            ? userRows.map((row) => row.uuid)
+                            : [],
+                        )
+                      }
+                    />
+                  </TableHead>
+                  <TableHead>Nickname</TableHead>
+                  <TableHead>Phone</TableHead>
+                  <TableHead>UUID</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {usersPaddingTop > 0 && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={5}
+                      style={{ height: usersPaddingTop }}
+                    />
+                  </TableRow>
+                )}
+                {userItems.map((item) => {
+                  const row = userRows[item.index];
+                  return (
+                    <TableRow
+                      key={row.uuid}
+                      className="cursor-pointer"
+                      onClick={() =>
+                        setSelectedUsers((previous) =>
+                          xor(previous, [row.uuid]),
+                        )
+                      }
                     >
-                      Delete
-                    </Button>
-                  )}
-                </div>
-              </div>
+                      <TableCell>
+                        <Checkbox
+                          checked={selectedUsers.includes(row.uuid)}
+                          onCheckedChange={() =>
+                            setSelectedUsers((previous) =>
+                              xor(previous, [row.uuid]),
+                            )
+                          }
+                        />
+                      </TableCell>
+                      <TableCell>{row.nickname}</TableCell>
+                      <TableCell>{row.telephone}</TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {row.uuid}
+                      </TableCell>
+                      <TableCell className="flex gap-1">
+                        {row.is_admin === 1 && <Badge>admin</Badge>}
+                        {row.status === BANNED && (
+                          <Badge variant="destructive">banned</Badge>
+                        )}
+                        {row.is_deleted && (
+                          <Badge variant="secondary">deleted</Badge>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {usersPaddingBottom > 0 && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={5}
+                      style={{ height: usersPaddingBottom }}
+                    />
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+            {users.isPending && (
+              <p className="text-muted-foreground animate-pulse p-4 text-sm">
+                Loading users…
+              </p>
             )}
           </div>
-        </div>
-      </Card>
+        </TabsContent>
+
+        <TabsContent value="groups" className="flex min-h-0 flex-col gap-2">
+          <SelectionBar count={selectedGroups.length}>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => runOnGroups(groupActions.enable)}
+            >
+              Enable
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => runOnGroups(groupActions.disable)}
+            >
+              Disable
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => runOnGroups(groupActions.remove)}
+            >
+              Delete
+            </Button>
+          </SelectionBar>
+
+          <div
+            ref={groupsScrollRef}
+            className="border-border min-h-0 flex-1 overflow-y-auto rounded-md border"
+          >
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-10">
+                    <Checkbox
+                      checked={allGroupsSelected}
+                      onCheckedChange={(checked) =>
+                        setSelectedGroups(
+                          checked === true
+                            ? groupRows.map((row) => row.group_id)
+                            : [],
+                        )
+                      }
+                    />
+                  </TableHead>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Owner</TableHead>
+                  <TableHead>Members</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {groupsPaddingTop > 0 && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={5}
+                      style={{ height: groupsPaddingTop }}
+                    />
+                  </TableRow>
+                )}
+                {groupItems.map((item) => {
+                  const row = groupRows[item.index];
+                  return (
+                    <TableRow
+                      key={row.group_id}
+                      className="cursor-pointer"
+                      onClick={() =>
+                        setSelectedGroups((previous) =>
+                          xor(previous, [row.group_id]),
+                        )
+                      }
+                    >
+                      <TableCell>
+                        <Checkbox
+                          checked={selectedGroups.includes(row.group_id)}
+                          onCheckedChange={() =>
+                            setSelectedGroups((previous) =>
+                              xor(previous, [row.group_id]),
+                            )
+                          }
+                        />
+                      </TableCell>
+                      <TableCell>{row.name}</TableCell>
+                      <TableCell className="font-mono text-xs">
+                        {row.owner_id}
+                      </TableCell>
+                      <TableCell className="tabular-nums">
+                        {row.member_cnt}
+                      </TableCell>
+                      <TableCell className="flex gap-1">
+                        {row.status === BANNED && (
+                          <Badge variant="destructive">disabled</Badge>
+                        )}
+                        {row.is_deleted && (
+                          <Badge variant="secondary">deleted</Badge>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+                {groupsPaddingBottom > 0 && (
+                  <TableRow>
+                    <TableCell
+                      colSpan={5}
+                      style={{ height: groupsPaddingBottom }}
+                    />
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+            {groups.isPending && (
+              <p className="text-muted-foreground animate-pulse p-4 text-sm">
+                Loading groups…
+              </p>
+            )}
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

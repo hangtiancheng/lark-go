@@ -40,8 +40,21 @@ const (
 // MessageType
 const (
 	MessageText         int8 = 0
+	MessageImage        int8 = 1
 	MessageFile         int8 = 2
 	MessageAudioOrVideo int8 = 3
+	MessageVideo        int8 = 4
+	MessageSystem       int8 = 5
+)
+
+// System notification topics carried in the content field of MessageSystem
+// frames. Clients re-fetch the matching list when one arrives.
+const (
+	NotifyContact = "contact"
+	NotifyGroup   = "group"
+	NotifyApply   = "apply"
+	NotifySession = "session"
+	NotifyOnline  = "online"
 )
 
 // ContactStatus

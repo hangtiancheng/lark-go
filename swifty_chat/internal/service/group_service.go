@@ -23,10 +23,13 @@ package service
 import (
 	"context"
 	"log"
+	"regexp"
 	"slices"
+	"strings"
 	"time"
 
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 
 	"github.com/hangtiancheng/swifty.go/swifty_chat/internal/constant"
 	"github.com/hangtiancheng/swifty.go/swifty_chat/internal/dao"
@@ -67,16 +70,32 @@ type AdminGroupItem struct {
 	IsDeleted bool   `json:"is_deleted"`
 }
 
-func CreateGroup(ctx context.Context, name, ownerId, avatar, notice string, addMode int8) (string, *GroupInfoResponse, int) {
+func CreateGroup(ctx context.Context, name, ownerId, avatar, notice string, addMode int8, memberIds []string) (string, *GroupInfoResponse, int) {
 	if addMode != constant.GroupAddModeDirect && addMode != constant.GroupAddModeReview {
 		return "invalid add_mode", nil, -2
 	}
+
+	// Only existing, active users besides the owner become initial members.
+	members := []string{ownerId}
+	if len(memberIds) > 0 {
+		var users []model.UserInfo
+		if err := dao.ActiveQuery(&users).WhereIn("uuid", memberIds).Find(ctx, &users); err != nil {
+			log.Println(err)
+			return constant.SystemError, nil, -1
+		}
+		for _, u := range users {
+			if u.Uuid != ownerId && !slices.Contains(members, u.Uuid) {
+				members = append(members, u.Uuid)
+			}
+		}
+	}
+
 	group := model.GroupInfo{
 		Uuid:      "G" + util.GetNowAndLenRandomString(11),
 		Name:      name,
 		Notice:    notice,
-		Members:   []string{ownerId},
-		MemberCnt: 1,
+		Members:   members,
+		MemberCnt: len(members),
 		OwnerId:   ownerId,
 		AddMode:   addMode,
 		Avatar:    avatar,
@@ -92,20 +111,51 @@ func CreateGroup(ctx context.Context, name, ownerId, avatar, notice string, addM
 		if _, err := e.Model(&group).Insert(sc, &group); err != nil {
 			return err
 		}
-		contact := model.UserContact{
-			UserId:      ownerId,
-			ContactId:   group.Uuid,
-			ContactType: constant.ContactTypeGroup,
-			Status:      constant.ContactNormal,
-			CreatedAt:   time.Now(),
-			UpdatedAt:   time.Now(),
+		for _, member := range members {
+			contact := model.UserContact{
+				UserId:      member,
+				ContactId:   group.Uuid,
+				ContactType: constant.ContactTypeGroup,
+				Status:      constant.ContactNormal,
+				CreatedAt:   time.Now(),
+				UpdatedAt:   time.Now(),
+			}
+			if _, err := e.Model(&contact).Insert(sc, &contact); err != nil {
+				return err
+			}
 		}
-		_, err := e.Model(&contact).Insert(sc, &contact)
-		return err
+		return nil
 	})
 	if err != nil {
 		log.Printf("CreateGroup failed: %v", err)
 		return constant.SystemError, nil, -1
+	}
+
+	// A welcome message keeps the fresh group visible in session previews,
+	// like the legacy backend's "欢迎" seed message.
+	welcome := model.Message{
+		Uuid:      "M" + util.GetNowAndLenRandomString(11),
+		Type:      constant.MessageText,
+		Content:   "Welcome to " + group.Name + "!",
+		SendId:    ownerId,
+		ReceiveId: group.Uuid,
+		Status:    constant.MessageSent,
+		CreatedAt: time.Now(),
+	}
+	var owner model.UserInfo
+	if err := dao.ActiveQuery(&owner).Where("uuid", ownerId).First(ctx, &owner); err == nil {
+		welcome.SendName = owner.Nickname
+		welcome.SendAvatar = owner.Avatar
+	}
+	if _, err := dao.Engine.Model(&welcome).Insert(ctx, &welcome); err != nil {
+		log.Printf("CreateGroup: welcome message failed: %v", err)
+	}
+	touchGroupSessions(ctx, &group)
+	for _, member := range members {
+		if member != ownerId {
+			PushSystem(constant.NotifyGroup, member)
+		}
+		PushSystem(constant.NotifySession, member)
 	}
 
 	return "group created", toGroupInfoResponse(&group), 0
@@ -242,6 +292,99 @@ func EnterGroupDirectly(ctx context.Context, userId, groupId string) (string, in
 	return "joined group", 0
 }
 
+// InviteGroupMembers adds the given users to the group, skipping the ones
+// already in it — migrated from the legacy "invite friends to group" flow.
+func InviteGroupMembers(ctx context.Context, groupId string, memberIds []string) (string, int) {
+	var group model.GroupInfo
+	err := dao.ActiveQuery(&group).Where("uuid", groupId).First(ctx, &group)
+	if err != nil {
+		log.Println(err)
+		return constant.SystemError, -1
+	}
+	if group.Status == constant.GroupStatusDisable {
+		return "group is disabled", -2
+	}
+
+	var candidates []string
+	for _, id := range memberIds {
+		if !slices.Contains(group.Members, id) && !slices.Contains(candidates, id) {
+			candidates = append(candidates, id)
+		}
+	}
+	if len(candidates) == 0 {
+		return "all selected users are already group members", -2
+	}
+	var users []model.UserInfo
+	if err := dao.ActiveQuery(&users).WhereIn("uuid", candidates).Find(ctx, &users); err != nil {
+		log.Println(err)
+		return constant.SystemError, -1
+	}
+	var newcomers []string
+	for _, u := range users {
+		newcomers = append(newcomers, u.Uuid)
+	}
+	if len(newcomers) == 0 {
+		return "no valid users to invite", -2
+	}
+
+	for _, id := range newcomers {
+		if err := addGroupMember(ctx, dao.Engine, groupId, id); err != nil {
+			log.Printf("InviteGroupMembers: add %s failed: %v", id, err)
+			return constant.SystemError, -1
+		}
+		if err := ensureGroupContact(ctx, dao.Engine, id, groupId); err != nil {
+			log.Printf("InviteGroupMembers: contact for %s failed: %v", id, err)
+			return constant.SystemError, -1
+		}
+	}
+	// Refresh the members array before creating sessions for everyone.
+	var updated model.GroupInfo
+	if err := dao.ActiveQuery(&updated).Where("uuid", groupId).First(ctx, &updated); err == nil {
+		touchGroupSessions(ctx, &updated)
+	}
+	PushSystem(constant.NotifyGroup, newcomers...)
+	PushSystem(constant.NotifySession, newcomers...)
+	return "members invited", 0
+}
+
+type SearchGroupItem struct {
+	GroupId   string `json:"group_id"`
+	Name      string `json:"name"`
+	Avatar    string `json:"avatar"`
+	MemberCnt int    `json:"member_cnt"`
+	AddMode   int8   `json:"add_mode"`
+	IsJoined  bool   `json:"is_joined"`
+}
+
+// SearchGroups finds groups by name keyword, flagging the ones the caller has
+// already joined.
+func SearchGroups(ctx context.Context, ownerId, keyword string) (string, []SearchGroupItem, int) {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return "keyword is required", nil, -2
+	}
+	pattern := primitive.Regex{Pattern: regexp.QuoteMeta(keyword), Options: "i"}
+	var groups []model.GroupInfo
+	err := dao.ActiveQuery(&groups).
+		Where("status", constant.GroupStatusNormal).
+		Where(bson.M{"name": pattern}).
+		Limit(20).
+		Find(ctx, &groups)
+	if err != nil {
+		log.Println(err)
+		return constant.SystemError, nil, -1
+	}
+	var list []SearchGroupItem
+	for _, g := range groups {
+		list = append(list, SearchGroupItem{
+			GroupId: g.Uuid, Name: g.Name, Avatar: g.Avatar,
+			MemberCnt: g.MemberCnt, AddMode: g.AddMode,
+			IsJoined: slices.Contains(g.Members, ownerId),
+		})
+	}
+	return "success", list, 0
+}
+
 // cleanupGroupMembership soft-deletes the member's session, contact record
 // (stamped with the given status) and pending applies for the group.
 func cleanupGroupMembership(ctx context.Context, e *swifty_orm.Engine, userId, groupId string, contactStatus int8) {
@@ -306,6 +449,11 @@ func cascadeGroupRemoval(ctx context.Context, e *swifty_orm.Engine, groupId stri
 }
 
 func DismissGroup(ctx context.Context, groupId string) (string, int) {
+	var group model.GroupInfo
+	if err := dao.ActiveQuery(&group).Where("uuid", groupId).First(ctx, &group); err != nil {
+		log.Println(err)
+		return constant.SystemError, -1
+	}
 	err := dao.WithTransaction(ctx, func(sc context.Context, e *swifty_orm.Engine) error {
 		if _, err := e.Model(&model.GroupInfo{}).Where("uuid", groupId).Update(sc, bson.M{
 			"status": constant.GroupStatusDismiss, "deleted_at": time.Now(),
@@ -318,6 +466,8 @@ func DismissGroup(ctx context.Context, groupId string) (string, int) {
 		log.Printf("DismissGroup %s failed: %v", groupId, err)
 		return constant.SystemError, -1
 	}
+	PushSystem(constant.NotifyGroup, group.Members...)
+	PushSystem(constant.NotifySession, group.Members...)
 	return "group dismissed", 0
 }
 
@@ -351,7 +501,17 @@ func UpdateGroupInfo(ctx context.Context, uuid string, fields bson.M) (string, i
 	return "group info updated", 0
 }
 
-func GetGroupMemberList(ctx context.Context, groupId string) (string, []UserInfoResponse, int) {
+type GroupMemberItem struct {
+	UserId        string `json:"user_id"`
+	Uuid          string `json:"uuid"`
+	Nickname      string `json:"nickname"`
+	Avatar        string `json:"avatar"`
+	IsOwner       bool   `json:"is_owner"`
+	JoinedAt      string `json:"joined_at"`
+	LastMessageAt string `json:"last_message_at"`
+}
+
+func GetGroupMemberList(ctx context.Context, groupId string) (string, []GroupMemberItem, int) {
 	var group model.GroupInfo
 	err := dao.ActiveQuery(&group).Where("uuid", groupId).First(ctx, &group)
 	if err != nil {
@@ -364,9 +524,55 @@ func GetGroupMemberList(ctx context.Context, groupId string) (string, []UserInfo
 		log.Println(err)
 		return constant.SystemError, nil, -1
 	}
-	var list []UserInfoResponse
+
+	// Join time comes from the member's group contact record; the owner's is
+	// the group creation time.
+	joinedAt := make(map[string]time.Time, len(group.Members))
+	var contacts []model.UserContact
+	if err := dao.ActiveQuery(&contacts).
+		Where("contact_id", groupId).
+		WhereIn("user_id", group.Members).
+		Find(ctx, &contacts); err == nil {
+		for _, c := range contacts {
+			joinedAt[c.UserId] = c.CreatedAt
+		}
+	}
+	joinedAt[group.OwnerId] = group.CreatedAt
+
+	// Last-speak time per member via a grouped max over the group's messages.
+	lastSpoke := make(map[string]time.Time, len(group.Members))
+	var rows []struct {
+		SendId string    `bson:"send_id"`
+		LastAt time.Time `bson:"last_at"`
+	}
+	if err := dao.Engine.Model(&model.Message{}).
+		Where("receive_id", groupId).
+		Where("type", "!=", constant.MessageAudioOrVideo).
+		WhereIn("send_id", group.Members).
+		GroupBy("send_id").
+		MaxAs("created_at", "last_at").
+		Aggregate(ctx, &rows); err == nil {
+		for _, r := range rows {
+			lastSpoke[r.SendId] = r.LastAt
+		}
+	} else {
+		log.Printf("GetGroupMemberList: last message aggregate failed: %v", err)
+	}
+
+	const timeLayout = "2006-01-02 15:04:05"
+	var list []GroupMemberItem
 	for _, u := range users {
-		list = append(list, *toUserInfoResponse(&u))
+		item := GroupMemberItem{
+			UserId: u.Uuid, Uuid: u.Uuid, Nickname: u.Nickname, Avatar: u.Avatar,
+			IsOwner: u.Uuid == group.OwnerId,
+		}
+		if t, ok := joinedAt[u.Uuid]; ok {
+			item.JoinedAt = t.Format(timeLayout)
+		}
+		if t, ok := lastSpoke[u.Uuid]; ok {
+			item.LastMessageAt = t.Format(timeLayout)
+		}
+		list = append(list, item)
 	}
 	return "success", list, 0
 }
@@ -401,6 +607,8 @@ func RemoveGroupMembers(ctx context.Context, groupId string, memberIds []string)
 	for _, id := range memberIds {
 		cleanupGroupMembership(ctx, dao.Engine, id, groupId, constant.ContactKicked)
 	}
+	PushSystem(constant.NotifyGroup, memberIds...)
+	PushSystem(constant.NotifySession, memberIds...)
 	return "members removed", 0
 }
 

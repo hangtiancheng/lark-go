@@ -20,235 +20,196 @@
  * SOFTWARE.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ChartBar } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
+import NumberFlow from "@number-flow/react";
+import { Trash2 } from "lucide-react";
+import { motion } from "motion/react";
+import { useEffect, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
+
 import { Badge } from "@/components/ui/badge";
-import useDashboardStore, { type GroupSnapshot } from "../store/dashboard";
-import { WS_URL } from "../config";
-import { formatSize, formatExpire } from "../utils/format";
+import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { wsUrl } from "@/env";
+import { useWindowedRows } from "@/lib/use-windowed-rows";
+import useDashboardStore, {
+  type DashboardStatus,
+  type GroupSnapshot,
+} from "@/store/dashboard";
+import { formatExpire, formatSize } from "@/utils/format";
 
 const ROW_HEIGHT = 36;
-const OVER_SCAN = 5;
-const DASHBOARD_WS = WS_URL + "/dashboard/ws";
+const DASHBOARD_WS = `${wsUrl}/dashboard/ws`;
 
 interface FlatRow {
   group: string;
   key: string;
   size: number;
-  sizeStr: string;
   level: number;
   expire_at: number;
-  expireStr: string;
 }
 
 function flatten(groups: GroupSnapshot[]): FlatRow[] {
   const rows: FlatRow[] = [];
-  for (const g of groups) {
-    if (!g.entries) continue;
-    for (const e of g.entries) {
+  for (const group of groups) {
+    for (const entry of group.entries ?? []) {
       rows.push({
-        group: g.name,
-        key: e.key,
-        size: e.size,
-        sizeStr: formatSize(e.size),
-        level: e.level,
-        expire_at: e.expire_at,
-        expireStr: formatExpire(e.expire_at),
+        group: group.name,
+        key: entry.key,
+        size: entry.size,
+        level: entry.level,
+        expire_at: entry.expire_at,
       });
     }
   }
   return rows;
 }
 
-function StatusBadge({ status }: { status: string }) {
-  if (status === "connected") {
-    return (
-      <Badge className="bg-success/15 text-success border-0">Connected</Badge>
-    );
-  }
-  if (status === "connecting") {
-    return (
-      <Badge className="bg-warning/15 text-warning border-0">Connecting</Badge>
-    );
-  }
+const STATUS_STYLE: Record<DashboardStatus, string> = {
+  connected: "bg-emerald-500",
+  connecting: "bg-amber-500",
+  disconnected: "bg-destructive",
+};
+
+function StatusBadge({ status }: { status: DashboardStatus }) {
   return (
-    <Badge
-      variant="destructive"
-      className="bg-destructive/15 text-destructive border-0"
-    >
-      Disconnected
-    </Badge>
+    <span className="text-muted-foreground flex items-center gap-1.5 text-xs">
+      <motion.span
+        className={`size-2 rounded-full ${STATUS_STYLE[status]}`}
+        animate={
+          status === "connecting" ? { opacity: [1, 0.3, 1] } : { opacity: 1 }
+        }
+        transition={
+          status === "connecting"
+            ? { duration: 1.2, repeat: Infinity }
+            : { duration: 0.2 }
+        }
+      />
+      {status}
+    </span>
   );
 }
 
 export default function Dashboard() {
-  const [totalEntries, setTotalEntries] = useState(0);
-  const [status, setStatus] = useState("disconnected");
-  const [visibleRows, setVisibleRows] = useState<FlatRow[]>([]);
-  const [topPad, setTopPad] = useState(0);
-  const [bottomPad, setBottomPad] = useState(0);
-
-  const containerRef = useRef<HTMLDivElement>(null);
-  const scrollTopRef = useRef(0);
-  const rafRef = useRef(0);
-  const allRowsRef = useRef<FlatRow[]>([]);
-
-  const syncView = useCallback((s: string) => {
-    const el = containerRef.current;
-    if (!el) return;
-    const rows = allRowsRef.current;
-    const containerHeight = el.clientHeight;
-    const totalRows = rows.length;
-    const visibleCount =
-      Math.ceil(containerHeight / ROW_HEIGHT) + OVER_SCAN * 2;
-    const startIdx = Math.max(
-      0,
-      Math.floor(scrollTopRef.current / ROW_HEIGHT) - OVER_SCAN,
-    );
-    const endIdx = Math.min(totalRows, startIdx + visibleCount);
-    setTotalEntries(totalRows);
-    setVisibleRows(rows.slice(startIdx, endIdx));
-    setTopPad(startIdx * ROW_HEIGHT);
-    setBottomPad(Math.max(0, (totalRows - endIdx) * ROW_HEIGHT));
-    setStatus(s);
-  }, []);
+  const navigate = useNavigate();
+  // Selector subscriptions replace the old 500 ms poll of the store snapshot.
+  const groups = useDashboardStore((state) => state.groups);
+  const status = useDashboardStore((state) => state.status);
 
   useEffect(() => {
-    useDashboardStore.getState().connect(DASHBOARD_WS);
-    const pollTimer = window.setInterval(() => {
-      const s = useDashboardStore.getState();
-      allRowsRef.current = flatten(s.groups);
-      syncView(s.status);
-    }, 500);
-    syncView(useDashboardStore.getState().status);
-    return () => {
-      clearInterval(pollTimer);
-      cancelAnimationFrame(rafRef.current);
-      useDashboardStore.getState().disconnect();
-    };
-  }, [syncView]);
+    const store = useDashboardStore.getState();
+    store.connect(DASHBOARD_WS);
+    return () => store.disconnect();
+  }, []);
 
-  const onScroll = () => {
-    const el = containerRef.current;
-    if (!el) return;
-    scrollTopRef.current = el.scrollTop;
-    cancelAnimationFrame(rafRef.current);
-    rafRef.current = requestAnimationFrame(() => {
-      syncView(useDashboardStore.getState().status);
-    });
-  };
-
-  const reconnect = () => {
-    useDashboardStore.getState().connect(DASHBOARD_WS);
-  };
-
-  const deleteEntry = (group: string, key: string) => {
-    useDashboardStore.getState().deleteKey(group, key);
-  };
+  const rows = useMemo(() => flatten(groups), [groups]);
+  const { scrollRef, items, paddingTop, paddingBottom } = useWindowedRows(
+    rows.length,
+    ROW_HEIGHT,
+  );
 
   return (
-    <div className="bg-background flex min-h-screen items-center justify-center p-4">
-      <Card className="shadow-primary/5 h-[700px] w-[1000px] gap-0 py-0 shadow-xl">
-        <div className="border-border bg-muted/30 flex h-14 shrink-0 items-center justify-between border-b px-6">
-          <div className="flex items-center gap-3">
-            <ChartBar size={20} className="text-primary" />
-            <span className="text-foreground text-lg font-semibold">
-              Cache Dashboard
-            </span>
-          </div>
-          <div className="flex items-center gap-3">
-            <StatusBadge status={status} />
-            <span className="text-muted-foreground text-xs">
-              {totalEntries} entries
-            </span>
-          </div>
+    <div className="bg-background flex min-h-screen flex-col gap-3 p-6">
+      <div className="flex items-center justify-between">
+        <div className="flex items-baseline gap-3">
+          <h1 className="text-lg font-semibold">Cache Dashboard</h1>
+          <span className="text-muted-foreground text-xs tabular-nums">
+            <NumberFlow value={rows.length} /> entries across {groups.length}{" "}
+            groups
+          </span>
         </div>
+        <div className="flex items-center gap-3">
+          <StatusBadge status={status} />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => useDashboardStore.getState().connect(DASHBOARD_WS)}
+          >
+            Reconnect
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => navigate("/manager")}
+          >
+            Back
+          </Button>
+        </div>
+      </div>
 
-        {status !== "connected" && (
-          <div className="flex flex-1 items-center justify-center">
-            <div className="text-center">
-              <p className="text-muted-foreground mb-4 text-sm">
-                WebSocket not connected
-              </p>
-              <Button size="sm" onClick={reconnect}>
-                Connect
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {status === "connected" && (
-          <div className="flex flex-1 flex-col overflow-hidden">
-            <div className="border-border bg-muted/30 text-foreground flex h-10 shrink-0 items-center gap-2 border-b px-4 text-xs font-medium">
-              <div className="w-16 text-center">Group</div>
-              <div className="flex-1">Key</div>
-              <div className="w-16 text-right">Size</div>
-              <div className="w-14 text-center">Level</div>
-              <div className="w-40 text-center">Expires</div>
-              <div className="w-16 text-center">Action</div>
-            </div>
-
-            <div
-              ref={containerRef}
-              className="flex-1 overflow-y-auto"
-              onScroll={onScroll}
-            >
-              <div
-                style={{
-                  paddingTop: `${topPad}px`,
-                  paddingBottom: `${bottomPad}px`,
-                }}
-              >
-                {visibleRows.map((row) => (
-                  <div
-                    key={row.group + row.key}
-                    className="border-border hover:bg-accent/40 flex h-9 items-center gap-2 border-b px-4 text-sm transition-colors"
-                  >
-                    <div className="w-16 text-center">
-                      <Badge variant="outline" className="font-normal">
-                        {row.group}
-                      </Badge>
-                    </div>
-                    <div
-                      className="flex-1 truncate font-mono text-xs"
-                      title={row.key}
+      <div
+        ref={scrollRef}
+        className="border-border min-h-0 flex-1 overflow-y-auto rounded-md border"
+      >
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Group</TableHead>
+              <TableHead>Key</TableHead>
+              <TableHead>Size</TableHead>
+              <TableHead>Level</TableHead>
+              <TableHead>Expires</TableHead>
+              <TableHead className="w-10" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {paddingTop > 0 && (
+              <TableRow>
+                <TableCell colSpan={6} style={{ height: paddingTop }} />
+              </TableRow>
+            )}
+            {items.map((item) => {
+              const row = rows[item.index];
+              return (
+                <TableRow key={`${row.group}:${row.key}`}>
+                  <TableCell>
+                    <Badge variant="secondary">{row.group}</Badge>
+                  </TableCell>
+                  <TableCell className="font-mono text-xs">{row.key}</TableCell>
+                  <TableCell className="tabular-nums">
+                    {formatSize(row.size)}
+                  </TableCell>
+                  <TableCell className="tabular-nums">{row.level}</TableCell>
+                  <TableCell className="text-muted-foreground text-xs">
+                    {formatExpire(row.expire_at)}
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label={`Delete ${row.key}`}
+                      className="text-destructive size-7"
+                      onClick={() =>
+                        useDashboardStore
+                          .getState()
+                          .deleteKey(row.group, row.key)
+                      }
                     >
-                      {row.key}
-                    </div>
-                    <div className="text-muted-foreground w-16 text-right text-xs">
-                      {row.sizeStr}
-                    </div>
-                    <div className="w-14 text-center">
-                      {row.level === 1 ? (
-                        <Badge className="bg-success/15 text-success border-0">
-                          hot
-                        </Badge>
-                      ) : (
-                        <Badge variant="secondary">cold</Badge>
-                      )}
-                    </div>
-                    <div className="text-muted-foreground w-40 text-center text-xs">
-                      {row.expireStr}
-                    </div>
-                    <div className="w-16 text-center">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-destructive hover:bg-destructive/10 hover:text-destructive h-6 px-2 text-xs"
-                        onClick={() => deleteEntry(row.group, row.key)}
-                      >
-                        Delete
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+            {paddingBottom > 0 && (
+              <TableRow>
+                <TableCell colSpan={6} style={{ height: paddingBottom }} />
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+        {rows.length === 0 && (
+          <p className="text-muted-foreground p-6 text-center text-sm">
+            {status === "connected" ? "Cache is empty" : "Not connected"}
+          </p>
         )}
-      </Card>
+      </div>
     </div>
   );
 }

@@ -32,6 +32,7 @@ import (
 func Setup() *swifty_http.Application {
 	app := swifty_http.Default()
 	app.Use(middleware.CORS())
+	app.Use(middleware.Auth())
 
 	conf := config.Get()
 	app.Static("/static/avatars", conf.Static.AvatarPath)
@@ -41,13 +42,15 @@ func Setup() *swifty_http.Application {
 	app.Post("/register", handler.Register)
 
 	user := app.Router("/user")
+	user.Post("/update-password", handler.UpdatePassword)
+	user.Post("/search-user", handler.SearchUser)
 	user.Post("/update-user-info", handler.UpdateUserInfo)
-	user.Post("/get-user-info-list", handler.GetUserInfoList)
-	user.Post("/able-users", handler.AbleUsers)
+	user.Post("/get-user-info-list", middleware.RequireAdmin(handler.GetUserInfoList))
+	user.Post("/able-users", middleware.RequireAdmin(handler.AbleUsers))
 	user.Post("/get-user-info", handler.GetUserInfo)
-	user.Post("/disable-users", handler.DisableUsers)
-	user.Post("/delete-users", handler.DeleteUsers)
-	user.Post("/set-admin", handler.SetAdmin)
+	user.Post("/disable-users", middleware.RequireAdmin(handler.DisableUsers))
+	user.Post("/delete-users", middleware.RequireAdmin(handler.DeleteUsers))
+	user.Post("/set-admin", middleware.RequireAdmin(handler.SetAdmin))
 	user.Post("/ws-logout", handler.WsLogout)
 
 	group := app.Router("/group")
@@ -61,9 +64,11 @@ func Setup() *swifty_http.Application {
 	group.Post("/update-group-info", handler.UpdateGroupInfo)
 	group.Post("/get-group-member-list", handler.GetGroupMemberList)
 	group.Post("/remove-group-members", handler.RemoveGroupMembers)
-	group.Post("/get-group-info-list", handler.GetGroupInfoList)
-	group.Post("/delete-groups", handler.DeleteGroups)
-	group.Post("/set-groups-status", handler.SetGroupsStatus)
+	group.Post("/invite-group-members", handler.InviteGroupMembers)
+	group.Post("/search-group", handler.SearchGroup)
+	group.Post("/get-group-info-list", middleware.RequireAdmin(handler.GetGroupInfoList))
+	group.Post("/delete-groups", middleware.RequireAdmin(handler.DeleteGroups))
+	group.Post("/set-groups-status", middleware.RequireAdmin(handler.SetGroupsStatus))
 
 	session := app.Router("/session")
 	session.Post("/open-session", handler.OpenSession)
@@ -71,9 +76,13 @@ func Setup() *swifty_http.Application {
 	session.Post("/get-group-session-list", handler.GetGroupSessionList)
 	session.Post("/delete-session", handler.DeleteSession)
 	session.Post("/check-open-session-allowed", handler.CheckOpenSessionAllowed)
+	session.Post("/mark-session-read", handler.MarkSessionRead)
 
 	contact := app.Router("/contact")
 	contact.Post("/get-user-list", handler.GetUserList)
+	contact.Post("/get-tag-list", handler.GetTagList)
+	contact.Post("/add-tag", handler.AddTag)
+	contact.Post("/update-contact", handler.UpdateContact)
 	contact.Post("/load-my-joined-group", handler.LoadMyJoinedGroup)
 	contact.Post("/get-contact-info", handler.GetContactInfo)
 	contact.Post("/apply-contact", handler.ApplyContact)
@@ -92,8 +101,14 @@ func Setup() *swifty_http.Application {
 	message.Post("/upload-avatar", handler.UploadAvatar)
 	message.Post("/upload-file", handler.UploadFile)
 
+	file := app.Router("/file")
+	file.Post("/verify", handler.VerifyFile)
+	file.Post("/upload-chunk", handler.UploadChunk)
+	file.Post("/merge", handler.MergeFile)
+
 	chatroom := app.Router("/chatroom")
 	chatroom.Post("/get-online-users", handler.GetOnlineUsers)
+	chatroom.Post("/get-callers", handler.GetCallers)
 
 	app.Get("/wss", handler.WsLogin)
 	app.Get("/dashboard/ws", swifty_cache.DashboardHandler())

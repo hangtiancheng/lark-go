@@ -35,6 +35,7 @@ type Session struct {
 	Avatar        string             `bson:"avatar" json:"avatar"`
 	LastMessage   string             `bson:"last_message" json:"last_message"`
 	LastMessageAt *time.Time         `bson:"last_message_at,omitempty" json:"last_message_at"`
+	LastReadAt    *time.Time         `bson:"last_read_at,omitempty" json:"last_read_at"`
 	CreatedAt     time.Time          `bson:"created_at" json:"created_at"`
 	DeletedAt     *time.Time         `bson:"deleted_at,omitempty" json:"-"`
 }

@@ -30,3 +30,19 @@ func GetOnlineUsers(ctx *swifty_http.Context, next func()) {
 	users := service.GetOnlineUserList()
 	JsonBack(ctx, "success", 0, users)
 }
+
+func GetCallers(ctx *swifty_http.Context, next func()) {
+	var req struct {
+		RoomId  string `json:"room_id"`
+		OwnerId string `json:"owner_id"`
+	}
+	if err := ctx.BindJSON(&req); err != nil {
+		JsonBack(ctx, "invalid request body", -1, nil)
+		return
+	}
+	if req.RoomId == "" {
+		JsonBack(ctx, "room_id is required", -2, nil)
+		return
+	}
+	JsonBack(ctx, "success", 0, service.GetCallers(req.RoomId, req.OwnerId))
+}

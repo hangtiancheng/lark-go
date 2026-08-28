@@ -21,6 +21,8 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"os"
@@ -44,6 +46,12 @@ type CacheConfig struct {
 type StaticConfig struct {
 	AvatarPath string `json:"avatarPath"`
 	FilePath   string `json:"filePath"`
+	ChunkPath  string `json:"chunkPath"`
+}
+
+type AuthConfig struct {
+	JwtSecret        string `json:"jwtSecret"`
+	TokenExpireHours int    `json:"tokenExpireHours"`
 }
 
 type Config struct {
@@ -51,6 +59,7 @@ type Config struct {
 	Mongo  MongoConfig  `json:"mongo"`
 	Cache  CacheConfig  `json:"cache"`
 	Static StaticConfig `json:"static"`
+	Auth   AuthConfig   `json:"auth"`
 }
 
 var conf *Config
@@ -63,6 +72,19 @@ func Load(path string) *Config {
 	conf = &Config{}
 	if err := json.Unmarshal(data, conf); err != nil {
 		log.Fatalf("failed to parse config: %v", err)
+	}
+	if conf.Auth.JwtSecret == "" {
+		// Tokens signed with an ephemeral secret become invalid on restart.
+		buf := make([]byte, 32)
+		_, _ = rand.Read(buf)
+		conf.Auth.JwtSecret = hex.EncodeToString(buf)
+		log.Println("auth.jwtSecret not configured; using an ephemeral secret (tokens expire on restart)")
+	}
+	if conf.Auth.TokenExpireHours <= 0 {
+		conf.Auth.TokenExpireHours = 14 * 24
+	}
+	if conf.Static.ChunkPath == "" {
+		conf.Static.ChunkPath = "./static/chunks"
 	}
 	return conf
 }

@@ -20,7 +20,9 @@
  * SOFTWARE.
  */
 
-import { BASE_URL } from "../config";
+import { memoize } from "es-toolkit";
+
+import { staticUrl } from "@/env";
 
 function fnv1a(str: string): number {
   let hash = 0x811c9dc5;
@@ -42,7 +44,7 @@ function xorShift32(seed: number): () => number {
   };
 }
 
-export function genIdenticon(seed: string): string {
+export const genIdenticon = memoize((seed: string): string => {
   const rand = xorShift32(fnv1a(seed));
 
   const GRID = 5;
@@ -80,7 +82,7 @@ export function genIdenticon(seed: string): string {
     }
   }
   return canvas.toDataURL();
-}
+});
 
 const LEGACY_DEFAULT = "https://vitejs.dev/logo.svg";
 
@@ -88,6 +90,5 @@ export function resolveAvatar(avatar: string, seed?: string): string {
   if (!avatar || avatar === LEGACY_DEFAULT) {
     return seed ? genIdenticon(seed) : "";
   }
-  if (avatar.startsWith("http")) return avatar;
-  return BASE_URL + avatar;
+  return staticUrl(avatar);
 }

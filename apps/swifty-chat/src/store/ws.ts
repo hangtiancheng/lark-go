@@ -20,95 +20,208 @@
  * SOFTWARE.
  */
 
+import { uniqBy } from "es-toolkit";
 import { create } from "zustand";
-import { WS_URL } from "../config";
+
+import { wsUrl } from "@/env";
+import { queryClient } from "@/lib/query-client";
+import { keys } from "@/service/queries";
+import {
+  MessageType,
+  SYSTEM_SENDER,
+  SystemTopic,
+  isGroupId,
+  messageSchema,
+  type Message,
+  type OutgoingFrame,
+} from "@/service/schemas";
+import { showToast } from "@/utils/toast";
+import useAuthStore from "./auth";
+
+export type ConnectionStatus = "disconnected" | "connecting" | "connected";
+
+/** `type: 3` frames carry WebRTC signalling; the call UI subscribes to them. */
+export type SignalListener = (signal: Record<string, unknown>) => void;
 
 export interface WsState {
-  status: "disconnected" | "connecting" | "connected";
-  onMessageHandler: ((msg: MessageEvent) => void) | null;
-  connect: (uuid: string) => void;
+  status: ConnectionStatus;
+  connect: (userId: string) => void;
   disconnect: () => void;
-  send: (data: unknown) => void;
-  setOnMessage: (handler: ((msg: MessageEvent) => void) | null) => void;
+  send: (frame: OutgoingFrame) => void;
+  subscribeToSignals: (listener: SignalListener) => () => void;
 }
 
-let rawSocket: WebSocket | null = null;
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-let reconnectDelay = 1000;
-let intentionalClose = false;
-
+/** The server rejects a frame when its outbound queue is full. */
+const OVERFLOW_TYPE = -1;
+const INITIAL_RECONNECT_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30_000;
 
-function scheduleReconnect(uuid: string) {
+let socket: WebSocket | null = null;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let reconnectDelay = INITIAL_RECONNECT_DELAY;
+let intentionalClose = false;
+let reconnecting = false;
+const signalListeners = new Set<SignalListener>();
+
+/** A system frame names the list that went stale rather than carrying new data. */
+const staleKeysByTopic: Record<string, ReadonlyArray<readonly unknown[]>> = {
+  [SystemTopic.Session]: [keys.sessions.all],
+  [SystemTopic.Contact]: [keys.contacts.all],
+  [SystemTopic.Apply]: [keys.contacts.all],
+  [SystemTopic.Group]: [keys.groups.all, keys.contacts.all],
+  [SystemTopic.Online]: [keys.chatroom.online, keys.contacts.all],
+};
+
+function invalidate(queryKey: readonly unknown[]) {
+  void queryClient.invalidateQueries({ queryKey });
+}
+
+function dispatchSignal(avData: string | undefined) {
+  if (!avData) return;
+  let payload: unknown;
+  try {
+    payload = JSON.parse(avData);
+  } catch {
+    return;
+  }
+  if (typeof payload !== "object" || payload === null) return;
+  for (const listener of signalListeners) {
+    listener(payload as Record<string, unknown>);
+  }
+}
+
+/** Direct messages are keyed by the peer, group messages by the group. */
+function conversationIdOf(frame: Message, selfId: string): string {
+  if (isGroupId(frame.receive_id)) return frame.receive_id;
+  return frame.send_id === selfId ? frame.receive_id : frame.send_id;
+}
+
+function appendToConversation(frame: Message) {
+  const selfId = useAuthStore.getState().userInfo.uuid;
+  if (!selfId) return;
+
+  const queryKey = keys.messages.with(selfId, conversationIdOf(frame, selfId));
+  // Writing to a conversation that was never opened would mark it fresh and
+  // suppress the real fetch, so only patch transcripts already in the cache.
+  if (queryClient.getQueryState(queryKey)) {
+    queryClient.setQueryData<Message[]>(queryKey, (current) =>
+      uniqBy([...(current ?? []), frame], (message) => message.uuid),
+    );
+  }
+  invalidate(keys.sessions.all);
+}
+
+function handleFrame(raw: unknown) {
+  // The server greets new clients with a plain-text line.
+  if (typeof raw !== "string" || !raw.startsWith("{")) return;
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return;
+  }
+
+  const parsed = messageSchema.safeParse(payload);
+  if (!parsed.success) return;
+  const frame = parsed.data;
+
+  if (frame.type === OVERFLOW_TYPE) {
+    showToast(frame.content || "Message send failed, please retry", "warning");
+    return;
+  }
+  if (frame.send_id === SYSTEM_SENDER) {
+    for (const queryKey of staleKeysByTopic[frame.content] ?? []) {
+      invalidate(queryKey);
+    }
+    return;
+  }
+  if (frame.type === MessageType.AvSignal) {
+    dispatchSignal(frame.av_data);
+    return;
+  }
+  appendToConversation(frame);
+}
+
+function scheduleReconnect(userId: string) {
   if (intentionalClose) return;
   reconnectTimer = setTimeout(() => {
     reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
-    doConnect(uuid);
+    openSocket(userId);
   }, reconnectDelay);
 }
 
-function doConnect(uuid: string) {
-  if (rawSocket) {
-    rawSocket.onclose = null;
-    rawSocket.close();
+function openSocket(userId: string) {
+  if (socket) {
+    socket.onclose = null;
+    socket.close();
   }
   useWsStore.setState({ status: "connecting" });
-  const ws = new WebSocket(WS_URL + "/wss?client_id=" + uuid);
-  ws.onopen = () => {
-    reconnectDelay = 1000;
+
+  const next = new WebSocket(
+    `${wsUrl}/wss?client_id=${encodeURIComponent(userId)}`,
+  );
+  next.onopen = () => {
+    reconnectDelay = INITIAL_RECONNECT_DELAY;
     useWsStore.setState({ status: "connected" });
+    // Anything could have changed while the socket was down.
+    if (reconnecting) {
+      reconnecting = false;
+      void queryClient.invalidateQueries();
+    }
   };
-  ws.onmessage = (msg: MessageEvent) => {
-    const handler = useWsStore.getState().onMessageHandler;
-    if (handler) handler(msg);
-  };
-  ws.onclose = () => {
-    rawSocket = null;
+  next.onmessage = (event: MessageEvent) => handleFrame(event.data);
+  next.onclose = () => {
+    socket = null;
+    reconnecting = true;
     useWsStore.setState({ status: "disconnected" });
-    scheduleReconnect(uuid);
+    scheduleReconnect(userId);
   };
-  ws.onerror = () => {
-    ws.close();
-  };
-  rawSocket = ws;
+  next.onerror = () => next.close();
+  socket = next;
 }
 
-const useWsStore = create<WsState>((set) => ({
-  status: "disconnected",
-  onMessageHandler: null,
+function clearReconnectTimer() {
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
+}
 
-  connect(uuid: string) {
+const useWsStore = create<WsState>(() => ({
+  status: "disconnected",
+
+  connect(userId: string) {
+    if (!userId) return;
     intentionalClose = false;
-    reconnectDelay = 1000;
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
-    }
-    doConnect(uuid);
+    reconnecting = false;
+    reconnectDelay = INITIAL_RECONNECT_DELAY;
+    clearReconnectTimer();
+    openSocket(userId);
   },
 
   disconnect() {
     intentionalClose = true;
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
+    clearReconnectTimer();
+    if (socket) {
+      socket.onclose = null;
+      socket.close();
+      socket = null;
     }
-    if (rawSocket) {
-      rawSocket.onclose = null;
-      rawSocket.close();
-      rawSocket = null;
-    }
-    set({ status: "disconnected" });
+    useWsStore.setState({ status: "disconnected" });
   },
 
-  send(data: unknown) {
-    if (rawSocket && rawSocket.readyState === WebSocket.OPEN) {
-      rawSocket.send(JSON.stringify(data));
+  send(frame: OutgoingFrame) {
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify(frame));
+    } else {
+      showToast("Not connected, message not sent", "error");
     }
   },
 
-  setOnMessage(handler: ((msg: MessageEvent) => void) | null) {
-    set({ onMessageHandler: handler });
+  subscribeToSignals(listener: SignalListener) {
+    signalListeners.add(listener);
+    return () => signalListeners.delete(listener);
   },
 }));
 

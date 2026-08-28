@@ -130,16 +130,49 @@ func (s *Server) register(client *Client) {
 	}
 	log.Printf("user %s connected", client.Uuid)
 	_ = client.Conn.WriteText("welcome to swifty chat")
+	if old == nil {
+		// Presence changed: contacts refresh their online indicators.
+		BroadcastSystem(constant.NotifyOnline, client.Uuid)
+		if _, err := dao.Engine.Model(&model.UserInfo{}).Where("uuid", client.Uuid).
+			Update(bgCtx(), bson.M{"last_online_at": time.Now()}); err != nil {
+			log.Printf("register: last_online_at update failed: %v", err)
+		}
+	}
 }
 
 func (s *Server) unregister(client *Client) {
 	s.mutex.Lock()
+	removed := false
 	if cur, ok := s.Clients[client.Uuid]; ok && cur == client {
 		delete(s.Clients, client.Uuid)
+		removed = true
 		log.Printf("user %s disconnected", client.Uuid)
 	}
 	s.mutex.Unlock()
 	client.shutdown()
+	if removed {
+		// Drop out of any active call so peers close the dead streams.
+		if roomId, remaining := Calls.Leave(client.Uuid); roomId != "" && len(remaining) > 0 {
+			avData, _ := json.Marshal(map[string]string{
+				"messageId": "PROXY", "type": "leave_call", "room_id": roomId,
+			})
+			rsp := MessageListItem{
+				Type:      constant.MessageAudioOrVideo,
+				SendId:    client.Uuid,
+				ReceiveId: roomId,
+				CreatedAt: time.Now().Format("2006-01-02 15:04:05"),
+				AVdata:    string(avData),
+			}
+			if payload, err := json.Marshal(rsp); err == nil {
+				s.sendRaw(payload, remaining...)
+			}
+		}
+		BroadcastSystem(constant.NotifyOnline, client.Uuid)
+		if _, err := dao.Engine.Model(&model.UserInfo{}).Where("uuid", client.Uuid).
+			Update(bgCtx(), bson.M{"last_offline_at": time.Now()}); err != nil {
+			log.Printf("unregister: last_offline_at update failed: %v", err)
+		}
+	}
 }
 
 func (s *Server) handleMessage(data []byte) {
@@ -168,22 +201,7 @@ func (s *Server) handleMessage(data []byte) {
 	}
 
 	if req.Type == constant.MessageAudioOrVideo {
-		// only persist certain AV signals
-		type avData struct {
-			MessageId string `json:"messageId"`
-			Type      string `json:"type"`
-		}
-		var av avData
-		_ = json.Unmarshal([]byte(req.AVdata), &av)
-		if av.MessageId == "PROXY" && (av.Type == "start_call" || av.Type == "receive_call" || av.Type == "reject_call") {
-			bgCtx := bgCtx()
-			if _, err := dao.Engine.Model(&msg).Insert(bgCtx, &msg); err != nil {
-				log.Printf("handleMessage: insert AV message failed: %v", err)
-			}
-		}
-		// AV signaling must never echo back to the sender: the caller would
-		// see its own start_call as an incoming call.
-		s.broadcast(req, msg, false)
+		s.handleAVMessage(req, msg)
 		return
 	}
 
@@ -193,7 +211,232 @@ func (s *Server) handleMessage(data []byte) {
 		return
 	}
 
+	// Surface the conversation in both sides' session lists before fan-out.
+	if msg.ReceiveId != "" && msg.ReceiveId[0] == 'U' {
+		touchDirectSessions(bgCtx, msg.SendId, msg.ReceiveId)
+	}
+
 	s.broadcast(req, msg, true)
+}
+
+// handleAVMessage interprets audio/video signaling. Call lifecycle frames
+// (start/join/leave/reject) go through the call manager for busy tracking and
+// room membership; sdp/candidate frames are relayed point-to-point.
+func (s *Server) handleAVMessage(req ChatMessageRequest, msg model.Message) {
+	var av struct {
+		MessageId string `json:"messageId"`
+		Type      string `json:"type"`
+		Media     string `json:"media"`
+		RoomId    string `json:"room_id"`
+	}
+	_ = json.Unmarshal([]byte(req.AVdata), &av)
+
+	// only persist certain AV signals
+	if av.MessageId == "PROXY" && (av.Type == "start_call" || av.Type == "receive_call" || av.Type == "reject_call") {
+		bgCtx := bgCtx()
+		if _, err := dao.Engine.Model(&msg).Insert(bgCtx, &msg); err != nil {
+			log.Printf("handleMessage: insert AV message failed: %v", err)
+		}
+	}
+
+	roomId := av.RoomId
+	if roomId == "" {
+		roomId = CallRoomId(msg.SendId, msg.ReceiveId)
+	}
+
+	switch {
+	case av.MessageId == "PROXY" && av.Type == "start_call":
+		s.handleStartCall(req, msg, roomId)
+	case av.MessageId == "PROXY" && av.Type == "receive_call":
+		// 1v1 accept: the callee joins the pair room, then the caller is told
+		// to create the offer. AV signaling never echoes back to the sender.
+		Calls.Join(roomId, msg.SendId)
+		s.broadcast(req, msg, false)
+	case av.MessageId == "PROXY" && av.Type == "join_call":
+		// Group accept: existing members are notified so each one creates an
+		// offer towards the newcomer.
+		others := GetCallers(roomId, msg.SendId)
+		Calls.Join(roomId, msg.SendId)
+		s.sendAVToUsers(req, msg, others)
+	case av.MessageId == "PROXY" && av.Type == "reject_call":
+		// Decline: free everyone in a 1v1 pair room; group calls continue.
+		if msg.ReceiveId != "" && msg.ReceiveId[0] == 'U' {
+			for _, member := range Calls.Members(roomId) {
+				Calls.Leave(member)
+			}
+			s.broadcast(req, msg, false)
+		}
+	case av.MessageId == "PEER_LEAVE" || (av.MessageId == "PROXY" && av.Type == "leave_call"):
+		leftRoom, remaining := Calls.Leave(msg.SendId)
+		notified := make(map[string]bool)
+		if leftRoom != "" {
+			s.sendAVToUsers(req, msg, remaining)
+			for _, m := range remaining {
+				notified[m] = true
+			}
+		}
+		// A caller hanging up before the callee answered must still close the
+		// callee's incoming-call popup.
+		if msg.ReceiveId != "" && msg.ReceiveId[0] == 'U' && !notified[msg.ReceiveId] {
+			s.broadcast(req, msg, false)
+		}
+	default:
+		// sdp / candidate and any custom frames: plain relay.
+		s.broadcast(req, msg, false)
+	}
+}
+
+// handleStartCall validates availability, marks the caller busy and invites
+// the callee(s). Failures are reported back to the caller as call_failed.
+func (s *Server) handleStartCall(req ChatMessageRequest, msg model.Message, roomId string) {
+	caller := msg.SendId
+	if Calls.IsBusy(caller) && !Calls.InRoom(roomId, caller) {
+		s.sendCallFailed(caller, roomId, "you are already in a call")
+		return
+	}
+
+	if msg.ReceiveId != "" && msg.ReceiveId[0] == 'U' {
+		callee := msg.ReceiveId
+		s.mutex.Lock()
+		_, online := s.Clients[callee]
+		s.mutex.Unlock()
+		if !online {
+			s.sendCallFailed(caller, roomId, "the other user is offline")
+			return
+		}
+		if Calls.IsBusy(callee) {
+			s.sendCallFailed(caller, roomId, "the other user is in a call")
+			return
+		}
+		Calls.Join(roomId, caller)
+		s.broadcast(req, msg, false)
+		return
+	}
+
+	if msg.ReceiveId != "" && msg.ReceiveId[0] == 'G' {
+		var group model.GroupInfo
+		if err := dao.ActiveQuery(&group).Where("uuid", msg.ReceiveId).First(bgCtx(), &group); err != nil {
+			s.sendCallFailed(caller, roomId, "group not found")
+			return
+		}
+		alreadyActive := len(Calls.Members(roomId)) > 0
+		var candidates []string
+		s.mutex.Lock()
+		for _, member := range group.Members {
+			if member == caller {
+				continue
+			}
+			if _, online := s.Clients[member]; !online {
+				continue
+			}
+			if Calls.IsBusy(member) {
+				continue
+			}
+			candidates = append(candidates, member)
+		}
+		s.mutex.Unlock()
+		if len(candidates) == 0 && !alreadyActive {
+			s.sendCallFailed(caller, roomId, "no one is available for the call")
+			return
+		}
+		Calls.Join(roomId, caller)
+		s.sendAVToUsers(req, msg, candidates)
+	}
+}
+
+// sendAVToUsers relays an AV frame to an explicit target list.
+func (s *Server) sendAVToUsers(req ChatMessageRequest, msg model.Message, targets []string) {
+	if len(targets) == 0 {
+		return
+	}
+	rsp := MessageListItem{
+		Uuid:   msg.Uuid,
+		SendId: msg.SendId, SendName: msg.SendName, SendAvatar: req.SendAvatar,
+		ReceiveId: msg.ReceiveId, Type: msg.Type, Content: msg.Content,
+		Url: msg.Url, FileSize: msg.FileSize, FileName: msg.FileName,
+		FileType: msg.FileType, CreatedAt: msg.CreatedAt.Format("2006-01-02 15:04:05"),
+		AVdata: msg.AVdata,
+	}
+	payload, err := json.Marshal(rsp)
+	if err != nil {
+		log.Printf("sendAVToUsers: marshal failed: %v", err)
+		return
+	}
+	s.sendRaw(payload, targets...)
+}
+
+// sendCallFailed reports a failed call attempt back to the caller.
+func (s *Server) sendCallFailed(uuid, roomId, reason string) {
+	avData, _ := json.Marshal(map[string]string{
+		"messageId": "PROXY",
+		"type":      "call_failed",
+		"room_id":   roomId,
+		"reason":    reason,
+	})
+	rsp := MessageListItem{
+		Type:      constant.MessageAudioOrVideo,
+		SendId:    "SYSTEM",
+		ReceiveId: uuid,
+		CreatedAt: time.Now().Format("2006-01-02 15:04:05"),
+		AVdata:    string(avData),
+	}
+	payload, err := json.Marshal(rsp)
+	if err != nil {
+		return
+	}
+	s.sendRaw(payload, uuid)
+}
+
+// sendRaw delivers a payload to the given clients without blocking.
+func (s *Server) sendRaw(payload []byte, targets ...string) {
+	s.mutex.Lock()
+	clients := make([]*Client, 0, len(targets))
+	for _, id := range targets {
+		if c, ok := s.Clients[id]; ok {
+			clients = append(clients, c)
+		}
+	}
+	s.mutex.Unlock()
+	for _, c := range clients {
+		select {
+		case c.SendBack <- payload:
+		default:
+			log.Printf("sendRaw: client %s buffer full, payload dropped", c.Uuid)
+		}
+	}
+}
+
+// PushSystem sends a system notification (MessageSystem frame) to specific
+// users; the content carries the topic the client should refresh.
+func PushSystem(topic string, uuids ...string) {
+	if len(uuids) == 0 {
+		return
+	}
+	rsp := MessageListItem{
+		Type:      constant.MessageSystem,
+		SendId:    "SYSTEM",
+		Content:   topic,
+		CreatedAt: time.Now().Format("2006-01-02 15:04:05"),
+	}
+	payload, err := json.Marshal(rsp)
+	if err != nil {
+		return
+	}
+	ChatServer.sendRaw(payload, uuids...)
+}
+
+// BroadcastSystem sends a system notification to every online user except the
+// excluded one (typically the originator).
+func BroadcastSystem(topic string, exclude string) {
+	ChatServer.mutex.Lock()
+	targets := make([]string, 0, len(ChatServer.Clients))
+	for uuid := range ChatServer.Clients {
+		if uuid != exclude {
+			targets = append(targets, uuid)
+		}
+	}
+	ChatServer.mutex.Unlock()
+	PushSystem(topic, targets...)
 }
 
 // broadcast delivers the message to its receiver(s). Sends are non-blocking:
@@ -231,6 +474,9 @@ func (s *Server) broadcast(req ChatMessageRequest, msg model.Message, echoToSend
 		if err := dao.ActiveQuery(&group).Where("uuid", msg.ReceiveId).First(bgCtx(), &group); err != nil {
 			log.Printf("broadcast: load group %s failed: %v", msg.ReceiveId, err)
 			return
+		}
+		if msg.Type != constant.MessageAudioOrVideo {
+			touchGroupSessions(bgCtx(), &group)
 		}
 		for _, member := range group.Members {
 			if !echoToSender && member == msg.SendId {
@@ -352,6 +598,13 @@ func GetOnlineUserList() []string {
 		users = append(users, uuid)
 	}
 	return users
+}
+
+func IsOnline(uuid string) bool {
+	ChatServer.mutex.Lock()
+	defer ChatServer.mutex.Unlock()
+	_, ok := ChatServer.Clients[uuid]
+	return ok
 }
 
 func bgCtx() context.Context {

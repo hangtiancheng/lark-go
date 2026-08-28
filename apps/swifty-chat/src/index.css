@@ -23,6 +23,10 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
+@import "streamdown/styles.css";
+
+/* Streamdown emits utility classes from its own bundle. */
+@source "../node_modules/streamdown/dist/*.js";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -136,6 +140,63 @@
   --sidebar-accent-foreground: oklch(0.25 0.03 350);
   --sidebar-border: oklch(0.9 0.02 350);
   --sidebar-ring: oklch(0.62 0.16 350);
+}
+
+.dark {
+  color-scheme: dark;
+
+  /* Same rose-pink hue, inverted luminance */
+  --background: oklch(0.19 0.015 350);
+  --foreground: oklch(0.95 0.01 350);
+
+  --card: oklch(0.23 0.018 350);
+  --card-foreground: oklch(0.95 0.01 350);
+
+  --popover: oklch(0.23 0.018 350);
+  --popover-foreground: oklch(0.95 0.01 350);
+
+  --primary: oklch(0.72 0.15 350);
+  --primary-foreground: oklch(0.18 0.02 350);
+
+  --secondary: oklch(0.29 0.03 350);
+  --secondary-foreground: oklch(0.94 0.012 350);
+
+  --muted: oklch(0.27 0.022 350);
+  --muted-foreground: oklch(0.68 0.02 350);
+
+  --accent: oklch(0.33 0.04 350);
+  --accent-foreground: oklch(0.96 0.01 350);
+
+  --destructive: oklch(0.65 0.2 25);
+  --destructive-foreground: oklch(0.15 0.02 25);
+
+  --success: oklch(0.68 0.16 145);
+  --success-foreground: oklch(0.15 0.02 145);
+
+  --warning: oklch(0.8 0.15 80);
+  --warning-foreground: oklch(0.2 0.04 80);
+
+  --info: oklch(0.68 0.13 230);
+  --info-foreground: oklch(0.15 0.02 230);
+
+  --border: oklch(0.32 0.025 350);
+  --input: oklch(0.35 0.028 350);
+  --ring: oklch(0.72 0.15 350);
+
+  --chart-1: oklch(0.72 0.15 350);
+  --chart-2: oklch(0.75 0.11 330);
+  --chart-3: oklch(0.78 0.09 310);
+  --chart-4: oklch(0.72 0.13 20);
+  --chart-5: oklch(0.76 0.1 40);
+
+  --sidebar: oklch(0.22 0.018 350);
+  --sidebar-foreground: oklch(0.95 0.01 350);
+  --sidebar-primary: oklch(0.72 0.15 350);
+  --sidebar-primary-foreground: oklch(0.18 0.02 350);
+  --sidebar-accent: oklch(0.31 0.035 350);
+  --sidebar-accent-foreground: oklch(0.96 0.01 350);
+  --sidebar-border: oklch(0.32 0.025 350);
+  --sidebar-ring: oklch(0.72 0.15 350);
 }
 
 @layer base {

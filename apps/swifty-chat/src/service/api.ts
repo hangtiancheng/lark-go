@@ -20,168 +20,347 @@
  * SOFTWARE.
  */
 
-import { BASE_URL } from "../config";
-import type { ApiResponse } from "../types";
+import * as z from "zod";
 
-async function request<T>(
-  endpoint: string,
-  data?: unknown,
-): Promise<ApiResponse<T>> {
-  try {
-    const response = await fetch(BASE_URL + endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(data || {}),
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!response.ok) {
-      return {
-        code: response.status,
-        message: `HTTP ${response.status}: ${response.statusText}`,
-        data: null as T,
-      };
-    }
-    return await response.json();
-  } catch (err) {
-    const message =
-      err instanceof DOMException && err.name === "TimeoutError"
-        ? "Request timed out"
-        : "Network error";
-    return { code: -1, message, data: null as T };
-  }
+import { post, postVoid, upload } from "./http";
+import {
+  adminGroupSchema,
+  adminUserSchema,
+  applySchema,
+  authSchema,
+  chunkVerifySchema,
+  contactInfoSchema,
+  friendSchema,
+  groupInfoSchema,
+  groupMemberSchema,
+  groupSearchResultSchema,
+  groupSessionSchema,
+  messageSchema,
+  myGroupSchema,
+  tagSchema,
+  uploadedAvatarSchema,
+  uploadedFileSchema,
+  userInfoSchema,
+  userSearchResultSchema,
+  userSessionSchema,
+  wireList,
+} from "./schemas";
+
+export interface Credentials {
+  telephone: string;
+  password: string;
 }
 
-async function upload(
-  endpoint: string,
-  formData: FormData,
-): Promise<ApiResponse> {
-  try {
-    const response = await fetch(BASE_URL + endpoint, {
-      method: "POST",
-      body: formData,
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (!response.ok) {
-      return {
-        code: response.status,
-        message: `HTTP ${response.status}: ${response.statusText}`,
-        data: null,
-      };
-    }
-    return await response.json();
-  } catch {
-    return { code: -1, message: "Upload failed", data: null };
-  }
+export interface ProfilePatch {
+  uuid: string;
+  nickname?: string;
+  email?: string;
+  birthday?: string;
+  signature?: string;
+  avatar?: string;
 }
 
-export const api = {
-  // Auth
-  login: (data: { telephone: string; password: string }) =>
-    request("/login", data),
-  register: (data: { nickname: string; telephone: string; password: string }) =>
-    request("/register", data),
+export interface GroupPatch {
+  uuid: string;
+  name?: string;
+  notice?: string;
+  add_mode?: number;
+  avatar?: string;
+}
 
-  // User
-  getUserInfo: (data: { owner_id: string }) =>
-    request("/user/get-user-info", data),
-  getUserInfoList: (data: { owner_id: string }) =>
-    request("/user/get-user-info-list", data),
-  updateUserInfo: (data: unknown) => request("/user/update-user-info", data),
-  wsLogout: (data: { owner_id: string }) => request("/user/ws-logout", data),
-  ableUsers: (data: { uuid_list: string[] }) =>
-    request("/user/able-users", data),
-  disableUsers: (data: { uuid_list: string[] }) =>
-    request("/user/disable-users", data),
-  deleteUsers: (data: { uuid_list: string[] }) =>
-    request("/user/delete-users", data),
-  setAdmin: (data: { uuid_list: string[]; is_admin: number }) =>
-    request("/user/set-admin", data),
+export const auth = {
+  login: (body: Credentials, signal?: AbortSignal) =>
+    post("/login", authSchema, body, signal),
+  register: (body: Credentials & { nickname: string }, signal?: AbortSignal) =>
+    post("/register", authSchema, body, signal),
+  /** Public endpoint: resets by telephone, no current password required. */
+  updatePassword: (body: Credentials) =>
+    postVoid("/user/update-password", body),
+};
 
-  // Contact
-  getContactInfo: (data: { user_id: string; contact_id: string }) =>
-    request("/contact/get-contact-info", data),
-  getUserList: (data: { owner_id: string }) =>
-    request("/contact/get-user-list", data),
-  applyContact: (data: {
+export const user = {
+  get: (ownerId: string, signal?: AbortSignal) =>
+    post("/user/get-user-info", userInfoSchema, { owner_id: ownerId }, signal),
+  update: (body: ProfilePatch) => postVoid("/user/update-user-info", body),
+  search: (ownerId: string, keyword: string, signal?: AbortSignal) =>
+    post(
+      "/user/search-user",
+      wireList(userSearchResultSchema),
+      { owner_id: ownerId, keyword },
+      signal,
+    ),
+  wsLogout: (ownerId: string) =>
+    postVoid("/user/ws-logout", { owner_id: ownerId }),
+
+  listAll: (ownerId: string, signal?: AbortSignal) =>
+    post(
+      "/user/get-user-info-list",
+      wireList(adminUserSchema),
+      { owner_id: ownerId },
+      signal,
+    ),
+  enable: (uuidList: string[]) =>
+    postVoid("/user/able-users", { uuid_list: uuidList }),
+  disable: (uuidList: string[]) =>
+    postVoid("/user/disable-users", { uuid_list: uuidList }),
+  remove: (uuidList: string[]) =>
+    postVoid("/user/delete-users", { uuid_list: uuidList }),
+  setAdmin: (uuidList: string[], isAdmin: number) =>
+    postVoid("/user/set-admin", { uuid_list: uuidList, is_admin: isAdmin }),
+};
+
+export const contact = {
+  info: (userId: string, contactId: string, signal?: AbortSignal) =>
+    post(
+      "/contact/get-contact-info",
+      contactInfoSchema,
+      { user_id: userId, contact_id: contactId },
+      signal,
+    ),
+  friends: (ownerId: string, signal?: AbortSignal) =>
+    post(
+      "/contact/get-user-list",
+      wireList(friendSchema),
+      { owner_id: ownerId },
+      signal,
+    ),
+  tags: (ownerId: string, signal?: AbortSignal) =>
+    post(
+      "/contact/get-tag-list",
+      wireList(tagSchema),
+      { owner_id: ownerId },
+      signal,
+    ),
+  addTag: (ownerId: string, name: string) =>
+    post("/contact/add-tag", tagSchema, { owner_id: ownerId, name }),
+  /** Omit a field to leave it unchanged. */
+  update: (body: {
+    user_id: string;
+    contact_id: string;
+    note_name?: string;
+    tag_id?: string;
+  }) => postVoid("/contact/update-contact", body),
+  joinedGroups: (ownerId: string, signal?: AbortSignal) =>
+    post(
+      "/contact/load-my-joined-group",
+      wireList(myGroupSchema),
+      { owner_id: ownerId },
+      signal,
+    ),
+  apply: (body: {
     user_id: string;
     contact_id: string;
     contact_type: number;
     message: string;
-  }) => request("/contact/apply-contact", data),
-  passContactApply: (data: { apply_id: string }) =>
-    request("/contact/pass-contact-apply", data),
-  getNewContactList: (data: { user_id: string }) =>
-    request("/contact/get-new-contact-list", data),
-  refuseContactApply: (data: { apply_id: string }) =>
-    request("/contact/refuse-contact-apply", data),
-  blackApply: (data: { apply_id: string }) =>
-    request("/contact/black-apply", data),
-  getAddGroupList: (data: { user_id: string }) =>
-    request("/contact/get-add-group-list", data),
-  deleteContact: (data: { user_id: string; contact_id: string }) =>
-    request("/contact/delete-contact", data),
-  blackContact: (data: { user_id: string; contact_id: string }) =>
-    request("/contact/black-contact", data),
-  cancelBlackContact: (data: { user_id: string; contact_id: string }) =>
-    request("/contact/cancel-black-contact", data),
-  loadMyJoinedGroup: (data: { owner_id: string }) =>
-    request("/contact/load-my-joined-group", data),
+  }) => postVoid("/contact/apply-contact", body),
+  contactApplies: (userId: string, signal?: AbortSignal) =>
+    post(
+      "/contact/get-new-contact-list",
+      wireList(applySchema),
+      { user_id: userId },
+      signal,
+    ),
+  groupApplies: (userId: string, signal?: AbortSignal) =>
+    post(
+      "/contact/get-add-group-list",
+      wireList(applySchema),
+      { user_id: userId },
+      signal,
+    ),
+  passApply: (applyId: string) =>
+    postVoid("/contact/pass-contact-apply", { apply_id: applyId }),
+  refuseApply: (applyId: string) =>
+    postVoid("/contact/refuse-contact-apply", { apply_id: applyId }),
+  blackApply: (applyId: string) =>
+    postVoid("/contact/black-apply", { apply_id: applyId }),
+  remove: (userId: string, contactId: string) =>
+    postVoid("/contact/delete-contact", {
+      user_id: userId,
+      contact_id: contactId,
+    }),
+  block: (userId: string, contactId: string) =>
+    postVoid("/contact/black-contact", {
+      user_id: userId,
+      contact_id: contactId,
+    }),
+  unblock: (userId: string, contactId: string) =>
+    postVoid("/contact/cancel-black-contact", {
+      user_id: userId,
+      contact_id: contactId,
+    }),
+};
 
-  // Session
-  openSession: (data: { send_id: string; receive_id: string }) =>
-    request("/session/open-session", data),
-  getUserSessionList: (data: { owner_id: string }) =>
-    request("/session/get-user-session-list", data),
-  getGroupSessionList: (data: { owner_id: string }) =>
-    request("/session/get-group-session-list", data),
-  deleteSession: (data: { owner_id: string; session_id: string }) =>
-    request("/session/delete-session", data),
-  checkOpenSessionAllowed: (data: { send_id: string; receive_id: string }) =>
-    request("/session/check-open-session-allowed", data),
+export const session = {
+  open: (sendId: string, receiveId: string, signal?: AbortSignal) =>
+    post(
+      "/session/open-session",
+      z.string(),
+      { send_id: sendId, receive_id: receiveId },
+      signal,
+    ),
+  userList: (ownerId: string, signal?: AbortSignal) =>
+    post(
+      "/session/get-user-session-list",
+      wireList(userSessionSchema),
+      { owner_id: ownerId },
+      signal,
+    ),
+  groupList: (ownerId: string, signal?: AbortSignal) =>
+    post(
+      "/session/get-group-session-list",
+      wireList(groupSessionSchema),
+      { owner_id: ownerId },
+      signal,
+    ),
+  remove: (ownerId: string, sessionId: string) =>
+    postVoid("/session/delete-session", {
+      owner_id: ownerId,
+      session_id: sessionId,
+    }),
+  isOpenAllowed: (sendId: string, receiveId: string) =>
+    post("/session/check-open-session-allowed", z.boolean(), {
+      send_id: sendId,
+      receive_id: receiveId,
+    }),
+  markRead: (ownerId: string, receiveId: string) =>
+    postVoid("/session/mark-session-read", {
+      owner_id: ownerId,
+      receive_id: receiveId,
+    }),
+};
 
-  // Message
-  getMessageList: (data: { send_id: string; receive_id: string }) =>
-    request("/message/get-message-list", data),
-  getGroupMessageList: (data: { group_id: string }) =>
-    request("/message/get-group-message-list", data),
-  uploadFile: (formData: FormData) => upload("/message/upload-file", formData),
-  uploadAvatar: (formData: FormData) =>
-    upload("/message/upload-avatar", formData),
+export const message = {
+  withUser: (sendId: string, receiveId: string, signal?: AbortSignal) =>
+    post(
+      "/message/get-message-list",
+      wireList(messageSchema),
+      { send_id: sendId, receive_id: receiveId },
+      signal,
+    ),
+  withGroup: (groupId: string, signal?: AbortSignal) =>
+    post(
+      "/message/get-group-message-list",
+      wireList(messageSchema),
+      { group_id: groupId },
+      signal,
+    ),
+  uploadAvatar: (file: File, signal?: AbortSignal) => {
+    const form = new FormData();
+    form.append("file", file);
+    return upload("/message/upload-avatar", uploadedAvatarSchema, form, signal);
+  },
+  uploadFile: (file: File, signal?: AbortSignal) => {
+    const form = new FormData();
+    form.append("file", file);
+    return upload("/message/upload-file", uploadedFileSchema, form, signal);
+  },
+};
 
-  // Group
-  createGroup: (data: {
+export const group = {
+  create: (body: {
     name: string;
     owner_id: string;
     avatar: string;
     notice?: string;
     add_mode?: number;
-  }) => request("/group/create-group", data),
-  loadMyGroup: (data: { owner_id: string }) =>
-    request("/group/load-my-group", data),
-  getGroupInfo: (data: { group_id: string }) =>
-    request("/group/get-group-info", data),
-  getGroupMemberList: (data: { group_id: string }) =>
-    request("/group/get-group-member-list", data),
-  updateGroupInfo: (data: unknown) => request("/group/update-group-info", data),
-  removeGroupMembers: (data: { group_id: string; member_ids: string[] }) =>
-    request("/group/remove-group-members", data),
-  leaveGroup: (data: { user_id: string; group_id: string }) =>
-    request("/group/leave-group", data),
-  dismissGroup: (data: { group_id: string }) =>
-    request("/group/dismiss-group", data),
-  checkGroupAddMode: (data: { group_id: string }) =>
-    request("/group/check-group-add-mode", data),
-  enterGroupDirectly: (data: { user_id: string; group_id: string }) =>
-    request("/group/enter-group-directly", data),
+  }) => postVoid("/group/create-group", body),
+  mine: (ownerId: string, signal?: AbortSignal) =>
+    post(
+      "/group/load-my-group",
+      wireList(myGroupSchema),
+      { owner_id: ownerId },
+      signal,
+    ),
+  info: (groupId: string, signal?: AbortSignal) =>
+    post(
+      "/group/get-group-info",
+      groupInfoSchema,
+      { group_id: groupId },
+      signal,
+    ),
+  update: (body: GroupPatch) => postVoid("/group/update-group-info", body),
+  members: (groupId: string, signal?: AbortSignal) =>
+    post(
+      "/group/get-group-member-list",
+      wireList(groupMemberSchema),
+      { group_id: groupId },
+      signal,
+    ),
+  removeMembers: (groupId: string, memberIds: string[]) =>
+    postVoid("/group/remove-group-members", {
+      group_id: groupId,
+      member_ids: memberIds,
+    }),
+  inviteMembers: (groupId: string, memberIds: string[]) =>
+    postVoid("/group/invite-group-members", {
+      group_id: groupId,
+      member_ids: memberIds,
+    }),
+  search: (ownerId: string, keyword: string, signal?: AbortSignal) =>
+    post(
+      "/group/search-group",
+      wireList(groupSearchResultSchema),
+      { owner_id: ownerId, keyword },
+      signal,
+    ),
+  leave: (userId: string, groupId: string) =>
+    postVoid("/group/leave-group", { user_id: userId, group_id: groupId }),
+  dismiss: (groupId: string) =>
+    postVoid("/group/dismiss-group", { group_id: groupId }),
+  addMode: (groupId: string) =>
+    post("/group/check-group-add-mode", z.number(), { group_id: groupId }),
+  enterDirectly: (userId: string, groupId: string) =>
+    postVoid("/group/enter-group-directly", {
+      user_id: userId,
+      group_id: groupId,
+    }),
 
-  // Group (admin)
-  getGroupInfoList: (data: unknown) =>
-    request("/group/get-group-info-list", data),
-  deleteGroups: (data: { uuid_list: string[] }) =>
-    request("/group/delete-groups", data),
-  setGroupsStatus: (data: { uuid_list: string[]; status: number }) =>
-    request("/group/set-groups-status", data),
+  listAll: (signal?: AbortSignal) =>
+    post("/group/get-group-info-list", wireList(adminGroupSchema), {}, signal),
+  removeAll: (uuidList: string[]) =>
+    postVoid("/group/delete-groups", { uuid_list: uuidList }),
+  setStatus: (uuidList: string[], status: number) =>
+    postVoid("/group/set-groups-status", { uuid_list: uuidList, status }),
+};
 
-  // Chatroom
-  getOnlineUsers: () => request("/chatroom/get-online-users"),
+export const file = {
+  verify: (body: { file_hash: string; chunk_cnt: number; ext_name: string }) =>
+    post("/file/verify", chunkVerifySchema, body),
+  uploadChunk: (
+    body: { file_hash: string; ext_name: string; chunk_idx: number },
+    chunk: Blob,
+    signal?: AbortSignal,
+  ) => {
+    const form = new FormData();
+    form.append("file_hash", body.file_hash);
+    form.append("ext_name", body.ext_name);
+    form.append("chunk_idx", String(body.chunk_idx));
+    form.append("chunk", chunk);
+    return upload("/file/upload-chunk", z.unknown(), form, signal);
+  },
+  merge: (body: { file_hash: string; ext_name: string; file_name: string }) =>
+    post("/file/merge", uploadedFileSchema, body),
+};
+
+export const chatroom = {
+  onlineUsers: (signal?: AbortSignal) =>
+    post("/chatroom/get-online-users", wireList(z.string()), {}, signal),
+  callers: (roomId: string, ownerId: string, signal?: AbortSignal) =>
+    post(
+      "/chatroom/get-callers",
+      wireList(z.string()),
+      { room_id: roomId, owner_id: ownerId },
+      signal,
+    ),
+};
+
+export const api = {
+  auth,
+  user,
+  contact,
+  session,
+  message,
+  group,
+  file,
+  chatroom,
 };
