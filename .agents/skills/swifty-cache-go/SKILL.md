@@ -1,5 +1,5 @@
 ---
-name: swifty-cache
+name: swifty-cache-go
 description: >
   Distributed groupcache-style cache for Go (module
   github.com/hangtiancheng/swifty.go/swifty_cache): read-through Group with a
