@@ -11,8 +11,7 @@
     "lint:fix": "go list -f '{{.Dir}}/...' -m | xargs golangci-lint run --fix",
     "tag": "node tag.js",
     "add:licenses": "node scripts/add-licenses.js",
-    "git:precommit": "rm -rf ./.claude && ln -s ./.github ./.claude",
-    "git:commit": "pnpm git:precommit && git add -A && git commit -m \"feat: Introduce new features\"",
+    "git:commit": "git add -A && git commit -m \"feat: Introduce new features\"",
     "git:push": "pnpm git:commit && git push origin main"
   }
 }
